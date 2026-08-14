@@ -29,13 +29,20 @@ const STORES = [
   "cache", // { key, value, ts }
   "emails", // EmailItem
   "browser", // BrowserEntry
+  "aiChat", // AiMessage
+  "playlists", // Playlist
+  "focus", // FocusSession
+  "transactions", // Transaction
+  "budgets", // Budget
+  "habits", // Habit
+  "habitLogs", // HabitLog
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 export function db(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, 1, {
+    dbPromise = openDB(DB_NAME, 2, {
       upgrade(d) {
         for (const s of STORES) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
@@ -111,6 +118,7 @@ export interface Movie {
   createdAt: number;
   source: "device" | "url";
   progress: number; // seconds
+  subtitleText?: string; // raw .srt / .vtt content
 }
 
 export interface Book {
@@ -188,6 +196,63 @@ export interface BrowserEntry {
   title: string;
   pinned: boolean;
   visitedAt: number;
+}
+
+export interface AiMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  trackIds: string[];
+  createdAt: number;
+}
+
+export interface FocusSession {
+  id: string;
+  date: string; // YYYY-MM-DD
+  task: string;
+  minutes: number;
+  kind: "focus" | "break";
+  completedAt: number;
+}
+
+export interface Transaction {
+  id: string;
+  date: string; // YYYY-MM-DD
+  amount: number; // always positive; kind says the direction
+  kind: "expense" | "income";
+  category: string;
+  note: string;
+  createdAt: number;
+}
+
+export interface Budget {
+  id: string;
+  category: string;
+  monthly: number;
+}
+
+export interface Habit {
+  id: string;
+  name: string;
+  frequency: "daily" | "weekly" | "custom";
+  days: number[]; // 0 (Sun) .. 6 (Sat) — for weekly/custom frequencies
+  routine: "Morning" | "Evening" | "Any";
+  color: string;
+  createdAt: number;
+  archived: boolean;
+}
+
+export interface HabitLog {
+  id: string;
+  habitId: string;
+  date: string; // YYYY-MM-DD
+  completedAt: number;
 }
 
 /* --------------------------- reactive store ---------------------------- */

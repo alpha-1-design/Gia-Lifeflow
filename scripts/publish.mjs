@@ -192,12 +192,14 @@ const tree = await gh(`/repos/${me.login}/${REPO_NAME}/git/trees`, {
 console.log(`Tree created: ${tree.sha.slice(0, 7)}`);
 
 // ---------- 6. Commit ----------
+const DEFAULT_MESSAGE =
+  "Initial commit: LifeFlow — private, offline-first life OS (web + Android APK)\n\nDashboard, weather, news, notes, diary, photos, voice, music, movies, books, health, mail (OAuth + app password), P2P encrypted chat, in-app browser, device-security lock. No account, no cloud, no telemetry.\n\nGenerated with Codebuff 🤖\nCo-Authored-By: Codebuff <noreply@codebuff.com>";
+
 const commit = await gh(`/repos/${me.login}/${REPO_NAME}/git/commits`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    message:
-      "Initial commit: LifeFlow — private, offline-first life OS (web + Android APK)\n\nDashboard, weather, news, notes, diary, photos, voice, music, movies, books, health, mail (OAuth + app password), P2P encrypted chat, in-app browser, device-security lock. No account, no cloud, no telemetry.\n\nGenerated with Codebuff 🤖\nCo-Authored-By: Codebuff <noreply@codebuff.com>",
+    message: process.env.GH_MESSAGE || DEFAULT_MESSAGE,
     tree: tree.sha,
     parents: parentSha ? [parentSha] : [],
     author,

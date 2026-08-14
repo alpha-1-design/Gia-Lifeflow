@@ -15,19 +15,23 @@ storage and stays there.
 
 | Module | What it does |
 | --- | --- |
-| Dashboard | Greeting, live clock, weather, news, GitHub stats, storage, and your stats for the day — assembled on-device, offline-first |
+| Dashboard | Greeting, live clock, weather, news, GitHub stats, storage, and your stats for the day — with an optional AI-written briefing that falls back to on-device rules offline |
+| Companion | Chat with an AI that can read what's on this device. Any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter…); the key stays on-device |
 | Notes | Fast notes with photo attachments, tags and pinning; autosaved and searchable |
 | Diary | A quiet page per day — mood, words, photos; history grouped by month |
 | Photos | Your pictures, held locally with captions |
 | Voice | Record thoughts aloud; encoded and stored on-device |
-| Music | Import tracks or accelerate downloads; play with progress + lock-screen controls |
-| Movies | Films on your device with resumable, chunked downloads |
+| Music | Import tracks or accelerate downloads; playlists, shuffle/repeat, playback speed, a 3-band equalizer, sleep timer, lock-screen controls |
+| Movies | Films on your device with resumable downloads, .srt/.vtt subtitles, playback speed and picture-in-picture |
 | Books | EPUB, PDF and TXT with progress that follows you |
 | Health | Sleep, weight, movement, water, meals — with trend charts |
+| Focus | Pomodoro timer with tasks, on-device notifications, daily minutes, streaks and a weekly chart |
+| Finance | Local-first spending: transactions, monthly income/spent/balance, category breakdown and per-category budgets |
+| Habits | Daily or custom-day habits with morning/evening routines, streaks and 12-week heatmaps |
 | Mail | Gmail via OAuth (web + app) **or** your Google app password over IMAP/SMTP (native app) |
 | Chat | Peer-to-peer, end-to-end encrypted (X25519 + XSalsa20-Poly1305 via libsodium). No server, no middle |
 | Browser | A quiet in-app browser with pins and history |
-| Settings | Profile + avatar, device-security lock, connections (Google, GitHub, weather city, news feeds), notifications, appearance, export/erase |
+| Settings | Profile + avatar, device-security lock, connections (Google, GitHub, weather, news, AI), notifications, appearance, encrypted backup/restore, erase |
 
 ## Privacy model
 
@@ -131,6 +135,29 @@ Tokens are held only in local storage and refreshed on-device (PKCE).
 Settings → Connections → enter your GitHub username and optionally a personal
 access token (for private repos / higher rate limits). Stats, languages and
 recent activity appear on the dashboard.
+
+## AI companion
+
+Optional. Settings → AI companion: paste any OpenAI-compatible API key, base
+URL and model (OpenAI, Groq, OpenRouter, Together, a local server — all speak
+the same `/chat/completions` API). The key is stored only on this device and
+sent only to the endpoint you configure.
+
+- The **dashboard briefing** is written by the model when configured (cached
+  on-device for 20 minutes) and by deterministic on-device rules otherwise.
+- The **Companion** page chats with your data — toggle "include my on-device
+  context" to let it read your notes, health, habits, mail, spending and media
+  before answering. Conversation history stays in local storage.
+
+## Encrypted backups
+
+Settings → Privacy & data → **Encrypted backup**: export everything (notes,
+diary, photos, music, mail, chat, stats…) into a single passphrase-protected
+`.lfb` file. Crypto is Web Crypto on-device: PBKDF2-SHA256 (250k iterations)
+derives an AES-256-GCM key from your passphrase — without it the file is
+unreadable. Restore on this device or a new one; device-lock credentials never
+travel in backups, and media blobs are embedded up to ~250 MB (larger files
+are kept as metadata).
 
 ## Project structure
 

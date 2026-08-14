@@ -1,15 +1,40 @@
-import { Download, Music2, Pause, Play, Plus, SkipBack, SkipForward, Trash2, Upload } from "lucide-react";
+import {
+  Download,
+  SlidersHorizontal,
+  ListMusic,
+  Music2,
+  Pause,
+  Play,
+  Plus,
+  Repeat,
+  Repeat1,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Timer,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import PageHeader from "@/components/app/PageHeader";
-import { useCollection, put, remove, deleteBlob, saveBlob, blobUrl, type Track, type DownloadTask } from "@/lib/db";
+import { useCollection, put, remove, deleteBlob, saveBlob, blobUrl, type Track, type DownloadTask, type Playlist } from "@/lib/db";
 import { fmtBytes, fmtDuration, filenameFromUrl, relativeTime, uid } from "@/lib/format";
 import { cancelDownload, deleteDownload, isDownloadActive, startDownload } from "@/lib/downloader";
+import { notify } from "@/lib/notifications";
+
+const EQ_BANDS = [
+  { key: "low", label: "Bass", freq: 200 },
+  { key: "mid", label: "Mid", freq: 1000 },
+  { key: "high", label: "Treble", freq: 3500 },
+] as const;
 
 export default function Music() {
   const tracks = useCollection<Track>("music");
   const downloads = useCollection<DownloadTask>("downloads");
+  const playlists = useCollection<Playlist>("playlists");
   const [tab, setTab] = useState<"library" | "downloads">("library");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
@@ -17,14 +42,25 @@ export default function Music() {
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
 
+  const [shuffle, setShuffle] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
+  const [speed, setSpeed] = useState(1);
+  const [sleepMin, setSleepMin] = useState<number | null>(null);
+  const [eqOn, setEqOn] = useState(false);
+  const [eqPanel, setEqPanel] = useState(false);
+  const [eq, setEq] = useState({ low: 0, mid: 0, high: 0 });
+  const [newPlaylist, setNewPlaylist] = useState("");
+  const [addTo, setAddTo] = useState<Track | null>(null);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
+  const queueRef = useRef<Track[]>([]);
+  const sleepTimerRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const eqGraphRef = useRef<{ source: MediaElementAudioSourceNode; gains: BiquadFilterNode[] } | null>(null);
 
   const sorted = [...tracks].sort((a, b) => b.createdAt - a.createdAt);
-  const musicDownloads = downloads
-    .filter((d) => d.kind === "music")
-    .sort((a, b) => b.createdAt - a.createdAt);
-
+  const musicDownloads = downloads.filter((d) => d.kind === "music").sort((a, b) => b.createdAt - a.createdAt);
   const current = tracks.find((t) => t.id === currentId) ?? null;
 
   // Convert finished music downloads into library tracks.
@@ -57,7 +93,82 @@ export default function Music() {
     });
   }, [musicDownloads, tracks]);
 
-  const playTrack = async (t: Track) => {
+  // Cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      if (sleepTimerRef.current) window.clearTimeout(sleepTimerRef.current);
+      if (eqGraphRef.current) {
+        try {
+          eqGraphRef.current.source.disconnect();
+        } catch {
+          /* already gone */
+        }
+      }
+      if (audioCtxRef.current) void audioCtxRef.current.close().catch(() => undefined);
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    };
+  }, []);
+
+  const applyEq = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!eqOn) {
+      if (eqGraphRef.current) {
+        try {
+          eqGraphRef.current.source.disconnect();
+        } catch {
+          /* noop */
+        }
+        eqGraphRef.current = null;
+      }
+      return;
+    }
+    if (eqGraphRef.current) {
+      eqGraphRef.current.gains.forEach((g, i) => (g.gain.value = [eq.low, eq.mid, eq.high][i]));
+      return;
+    }
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = audioCtxRef.current ?? new Ctor();
+    audioCtxRef.current = ctx;
+    await ctx.resume().catch(() => undefined);
+    const source = ctx.createMediaElementSource(audio);
+    const gains = EQ_BANDS.map((band) => {
+      const f = ctx.createBiquadFilter();
+      f.type = band.key === "mid" ? "peaking" : band.key === "low" ? "lowshelf" : "highshelf";
+      f.frequency.value = band.freq;
+      if (band.key === "mid") f.Q.value = 1;
+      return f;
+    });
+    source.connect(gains[0]);
+    gains[0].connect(gains[1]);
+    gains[1].connect(gains[2]);
+    gains[2].connect(ctx.destination);
+    gains.forEach((g, i) => (g.gain.value = [eq.low, eq.mid, eq.high][i]));
+    eqGraphRef.current = { source, gains };
+  };
+
+  useEffect(() => {
+    void applyEq();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eqOn, eq.low, eq.mid, eq.high]);
+
+  const pickNext = (): Track | null => {
+    const queue = queueRef.current.length > 0 ? queueRef.current : sorted;
+    if (queue.length === 0) return null;
+    const idx = queue.findIndex((t) => t.id === currentId);
+    if (shuffle && queue.length > 1) {
+      let r = idx;
+      while (r === idx) r = Math.floor(Math.random() * queue.length);
+      return queue[r];
+    }
+    const next = idx + 1;
+    if (next < queue.length) return queue[next];
+    return repeatMode === "all" && queue.length > 0 ? queue[0] : null;
+  };
+
+  const playTrack = async (t: Track, queue?: Track[]) => {
+    if (queue) queueRef.current = queue;
     if (currentId === t.id) {
       if (audioRef.current) {
         if (playing) audioRef.current.pause();
@@ -66,21 +177,37 @@ export default function Music() {
       return;
     }
     audioRef.current?.pause();
+    if (eqGraphRef.current) {
+      try {
+        eqGraphRef.current.source.disconnect();
+      } catch {
+        /* noop */
+      }
+      eqGraphRef.current = null;
+    }
     const u = await blobUrl(t.blobId);
     if (!u) return;
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = u;
     const audio = new Audio(u);
     audioRef.current = audio;
+    audio.playbackRate = speed;
     audio.ontimeupdate = () => setTime(audio.currentTime);
     audio.onended = () => {
-      setPlaying(false);
-      next();
+      if (repeatMode === "one") {
+        audio.currentTime = 0;
+        void audio.play();
+        return;
+      }
+      const nxt = pickNext();
+      if (nxt) void playTrack(nxt);
+      else setPlaying(false);
     };
     setCurrentId(t.id);
     setTime(0);
     await audio.play();
     setPlaying(true);
+    if (eqOn) void applyEq();
     if ("mediaSession" in navigator) {
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -90,7 +217,10 @@ export default function Music() {
         });
         navigator.mediaSession.setActionHandler("play", () => void audio.play());
         navigator.mediaSession.setActionHandler("pause", () => audio.pause());
-        navigator.mediaSession.setActionHandler("nexttrack", () => next());
+        navigator.mediaSession.setActionHandler("nexttrack", () => {
+          const nxt = pickNext();
+          if (nxt) void playTrack(nxt);
+        });
         navigator.mediaSession.setActionHandler("previoustrack", () => prev());
       } catch {
         /* older browsers */
@@ -105,15 +235,36 @@ export default function Music() {
   };
 
   const next = () => {
-    const list = sorted;
-    const idx = list.findIndex((t) => t.id === currentId);
-    if (idx >= 0 && list[idx + 1]) void playTrack(list[idx + 1]);
+    const nxt = pickNext();
+    if (nxt) void playTrack(nxt);
   };
 
   const prev = () => {
-    const list = sorted;
-    const idx = list.findIndex((t) => t.id === currentId);
-    if (idx > 0 && list[idx - 1]) void playTrack(list[idx - 1]);
+    const queue = queueRef.current.length > 0 ? queueRef.current : sorted;
+    const idx = queue.findIndex((t) => t.id === currentId);
+    if (idx > 0 && queue[idx - 1]) void playTrack(queue[idx - 1]);
+    else if (queue.length > 0) void playTrack(queue[0]);
+  };
+
+  const setSleep = (m: number | null) => {
+    if (sleepTimerRef.current) {
+      window.clearTimeout(sleepTimerRef.current);
+      sleepTimerRef.current = null;
+    }
+    setSleepMin(m);
+    if (m) {
+      sleepTimerRef.current = window.setTimeout(() => {
+        audioRef.current?.pause();
+        setPlaying(false);
+        setSleepMin(null);
+        notify("Sleep timer", "Playback paused for the night.");
+      }, m * 60_000);
+    }
+  };
+
+  const changeSpeed = (s: number) => {
+    setSpeed(s);
+    if (audioRef.current) audioRef.current.playbackRate = s;
   };
 
   const importFiles = async (files: FileList | null) => {
@@ -159,12 +310,37 @@ export default function Music() {
     toast("Track removed");
   };
 
+  const createPlaylist = async () => {
+    const n = newPlaylist.trim();
+    if (!n) return;
+    await put<Playlist>("playlists", { id: uid(), name: n, trackIds: [], createdAt: Date.now() });
+    setNewPlaylist("");
+  };
+
+  const addToPlaylist = async (p: Playlist, t: Track) => {
+    if (!p.trackIds.includes(t.id)) {
+      await put<Playlist>("playlists", { ...p, trackIds: [...p.trackIds, t.id] });
+    }
+    toast(`Added to ${p.name}`);
+    setAddTo(null);
+  };
+
+  const playPlaylist = (p: Playlist) => {
+    const list = p.trackIds.map((id) => tracks.find((t) => t.id === id)).filter((t): t is Track => Boolean(t));
+    if (list.length === 0) return toast("That playlist is empty");
+    void playTrack(list[0], list);
+  };
+
+  const deletePlaylist = async (p: Playlist) => {
+    await remove("playlists", p.id);
+  };
+
   return (
     <div>
       <PageHeader
         eyebrow="Media"
         title="Music"
-        description="Your library lives on this device — import files or accelerate downloads from any URL."
+        description="Your library lives on this device — playlists, equalizer, sleep timer, and accelerated downloads."
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -187,6 +363,44 @@ export default function Music() {
 
       {tab === "library" && (
         <>
+          {/* Playlists */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <ListMusic className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {playlists.map((p) => (
+              <span key={p.id} className="flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs">
+                <button type="button" onClick={() => playPlaylist(p)} className="transition-colors hover:text-foreground">
+                  {p.name} · {p.trackIds.length}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deletePlaylist(p)}
+                  className="text-muted-foreground transition-colors hover:text-destructive"
+                  title="Delete playlist"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <div className="flex items-center gap-1">
+              <input
+                value={newPlaylist}
+                onChange={(e) => setNewPlaylist(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createPlaylist();
+                }}
+                placeholder="New playlist"
+                className="w-28 rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:border-foreground/40"
+              />
+              <button
+                type="button"
+                onClick={() => void createPlaylist()}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
           <div className="mb-4 flex items-center justify-between">
             <p className="microlabel">{sorted.length} tracks</p>
             <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent">
@@ -207,7 +421,7 @@ export default function Music() {
               {sorted.map((t) => (
                 <div
                   key={t.id}
-                  className={`group flex items-center gap-3 rounded-md border p-3 transition-colors ${
+                  className={`group relative flex items-center gap-3 rounded-md border p-3 transition-colors ${
                     currentId === t.id ? "border-foreground/50 bg-accent/40" : "hover:bg-accent/30"
                   }`}
                 >
@@ -227,6 +441,45 @@ export default function Music() {
                   <span className="hidden text-[11px] text-muted-foreground/70 sm:block">
                     {t.source === "device" ? "device" : "download"} · {relativeTime(t.createdAt)}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setAddTo(addTo?.id === t.id ? null : t)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-accent group-hover:opacity-100"
+                    title="Add to playlist"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  {addTo?.id === t.id && (
+                    <div className="absolute top-full right-0 z-10 mt-1 w-48 rounded-md border bg-card p-1 shadow-md">
+                      {playlists.length === 0 && (
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">No playlists yet</p>
+                      )}
+                      {playlists.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => void addToPlaylist(p, t)}
+                          className="block w-full rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const n = window.prompt("Playlist name");
+                          if (n?.trim()) {
+                            await put<Playlist>("playlists", { id: uid(), name: n.trim(), trackIds: [t.id], createdAt: Date.now() });
+                            toast(`Created "${n.trim()}"`);
+                          }
+                          setAddTo(null);
+                        }}
+                        className="mt-1 block w-full rounded border-t px-2 py-1.5 text-left text-xs font-medium transition-colors hover:bg-accent"
+                      >
+                        + New playlist
+                      </button>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => void removeTrack(t)}
@@ -251,6 +504,26 @@ export default function Music() {
                   <p className="truncate text-xs text-muted-foreground">{current.artist}</p>
                 </div>
                 <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShuffle((s) => !s)}
+                    className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                      shuffle ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
+                    }`}
+                    title="Shuffle"
+                  >
+                    <Shuffle className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRepeatMode((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))}
+                    className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                      repeatMode !== "off" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
+                    }`}
+                    title={repeatMode === "one" ? "Repeat one" : repeatMode === "all" ? "Repeat all" : "Repeat off"}
+                  >
+                    {repeatMode === "one" ? <Repeat1 className="h-4 w-4" /> : <Repeat className="h-4 w-4" />}
+                  </button>
                   <button type="button" onClick={prev} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent">
                     <SkipBack className="h-4 w-4" />
                   </button>
@@ -260,12 +533,48 @@ export default function Music() {
                   <button type="button" onClick={next} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent">
                     <SkipForward className="h-4 w-4" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setSleepMin((s) => (s === null ? 15 : null))}
+                    className={`relative flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                      sleepMin ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
+                    }`}
+                    title="Sleep timer"
+                  >
+                    <Timer className="h-4 w-4" />
+                    {sleepMin && <span className="absolute -top-1.5 -right-1.5 rounded-full bg-foreground px-1 text-[9px] text-background">{sleepMin}m</span>}
+                  </button>
+                  <select
+                    value={speed}
+                    onChange={(e) => changeSpeed(Number(e.target.value))}
+                    className="rounded-md border bg-transparent px-1.5 py-1.5 text-xs outline-none focus:border-foreground/40"
+                    title="Playback speed"
+                  >
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
+                      <option key={s} value={s}>{s}×</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setEqOn((v) => !v)}
+                    className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                      eqOn ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
+                    }`}
+                    title="Equalizer"
+                  >
+                    <SlidersHorizontal className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEqPanel((v) => !v)}
+                    className={`flex h-8 items-center justify-center rounded-md px-2 text-xs transition-colors ${eqPanel ? "bg-accent" : "text-muted-foreground hover:bg-accent"}`}
+                  >
+                    EQ
+                  </button>
                 </div>
               </div>
               <div className="mt-3 flex items-center gap-3">
-                <span className="w-12 text-right font-mono text-xs text-muted-foreground tabular-nums">
-                  {fmtDuration(time)}
-                </span>
+                <span className="w-12 text-right font-mono text-xs text-muted-foreground tabular-nums">{fmtDuration(time)}</span>
                 <input
                   type="range"
                   min={0}
@@ -279,10 +588,30 @@ export default function Music() {
                   }}
                   className="flex-1"
                 />
-                <span className="w-12 font-mono text-xs text-muted-foreground tabular-nums">
-                  {fmtDuration(current.duration)}
-                </span>
+                <span className="w-12 font-mono text-xs text-muted-foreground tabular-nums">{fmtDuration(current.duration)}</span>
               </div>
+              {eqPanel && eqOn && (
+                <div className="mt-3 flex items-center gap-5 border-t pt-3">
+                  {EQ_BANDS.map((band) => (
+                    <label key={band.key} className="flex flex-1 flex-col items-center gap-1 text-[10px] text-muted-foreground">
+                      {band.label}
+                      <input
+                        type="range"
+                        min={-12}
+                        max={12}
+                        step={1}
+                        value={eq[band.key]}
+                        onChange={(e) => setEq((prev) => ({ ...prev, [band.key]: Number(e.target.value) }))}
+                        className="w-full"
+                      />
+                      <span className="font-mono tabular-nums">{eq[band.key] > 0 ? `+${eq[band.key]}` : eq[band.key]} dB</span>
+                    </label>
+                  ))}
+                  {sleepMin && (
+                    <span className="text-[10px] text-muted-foreground">Sleep in {sleepMin}m</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>
@@ -312,11 +641,7 @@ export default function Music() {
                 type="button"
                 disabled={!url.trim()}
                 onClick={() => {
-                  void startDownload({
-                    url: url.trim(),
-                    kind: "music",
-                    title: title.trim() || filenameFromUrl(url),
-                  });
+                  void startDownload({ url: url.trim(), kind: "music", title: title.trim() || filenameFromUrl(url) });
                   setUrl("");
                   setTitle("");
                 }}
@@ -329,17 +654,13 @@ export default function Music() {
 
           <div className="mt-5 space-y-2">
             <p className="microlabel mb-3">Queue</p>
-            {musicDownloads.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">Nothing downloading.</p>
-            )}
+            {musicDownloads.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">Nothing downloading.</p>}
             {musicDownloads.map((d) => (
               <div key={d.id} className="quiet-card p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{d.title}</p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {d.url} · {d.status}
-                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{d.url} · {d.status}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="font-mono text-xs text-muted-foreground tabular-nums">
@@ -347,20 +668,12 @@ export default function Music() {
                       {d.total > 0 ? ` / ${fmtBytes(d.total)}` : ""}
                     </span>
                     {isDownloadActive(d.id) ? (
-                      <button
-                        type="button"
-                        onClick={() => cancelDownload(d.id)}
-                        className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent"
-                      >
+                      <button type="button" onClick={() => cancelDownload(d.id)} className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">
                         Cancel
                       </button>
                     ) : (
                       (d.status === "done" || d.status === "error") && (
-                        <button
-                          type="button"
-                          onClick={() => void deleteDownload(d.id)}
-                          className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent"
-                        >
+                        <button type="button" onClick={() => void deleteDownload(d.id)} className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">
                           Clear
                         </button>
                       )
@@ -368,14 +681,9 @@ export default function Music() {
                   </div>
                 </div>
                 <div className="mt-3 h-1 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-foreground transition-all"
-                    style={{ width: `${Math.round(d.progress * 100)}%` }}
-                  />
+                  <div className="h-full bg-foreground transition-all" style={{ width: `${Math.round(d.progress * 100)}%` }} />
                 </div>
-                {d.status === "error" && d.error && (
-                  <p className="mt-2 text-xs text-destructive">{d.error}</p>
-                )}
+                {d.status === "error" && d.error && <p className="mt-2 text-xs text-destructive">{d.error}</p>}
                 {d.status === "done" && (
                   <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Download className="h-3 w-3" /> Ready — added to your library.

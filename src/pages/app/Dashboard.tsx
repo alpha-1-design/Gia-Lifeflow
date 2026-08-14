@@ -5,6 +5,7 @@ import {
   Github,
   Newspaper,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -13,6 +14,7 @@ import BlobImage from "@/components/BlobImage";
 import { useCollection, useSetting, getStorageUsage } from "@/lib/db";
 import { fmtBytes, fmtDateLong, fmtTime, greeting, relativeTime, todayKey } from "@/lib/format";
 import { fetchGithubStats, fetchNewsList, fetchWeather, type GithubStats, type NewsItem, type Weather } from "@/lib/clients";
+import { generateBriefing, DEFAULT_AI_CONFIG, type AiConfig } from "@/lib/ai";
 
 const EMPTY_PROFILE = { name: "", bio: "", avatarBlobId: undefined as string | undefined };
 const EMPTY_GITHUB = { username: "", token: "" };
@@ -43,12 +45,17 @@ export default function Dashboard() {
   const books = useCollection<any>("books");
   const downloads = useCollection<any>("downloads");
   const emails = useCollection<any>("emails");
+  const focusSessions = useCollection<any>("focus");
+  const transactions = useCollection<any>("transactions");
+  const [aiCfg] = useSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);
 
   const [weather, setWeather] = useState<Weather | null>(null);
   const [gh, setGh] = useState<GithubStats | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [storage, setStorage] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [briefing, setBriefing] = useState<{ text: string; fromAi: boolean } | null>(null);
+  const [briefingBusy, setBriefingBusy] = useState(false);
 
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 1000);
@@ -69,33 +76,27 @@ export default function Dashboard() {
 
   const today = todayKey(now);
   const healthToday = health.filter((h) => h.date === today);
-  const lastSleep = useMemo(() => {
-    const sleeps = health
-      .filter((h) => h.type === "sleep" && h.data?.hours)
-      .sort((a, b) => (a.date > b.date ? -1 : 1));
-    return sleeps[0] as any | undefined;
-  }, [health]);
-
   const unread = emails.filter((e) => !e.read).length;
   const activeDl = downloads.filter((d) => d.status === "downloading" || d.status === "queued").length;
   const mediaCount = music.length + movies.length + books.length;
+  const focusToday = focusSessions
+    .filter((f) => f.date === today && f.kind === "focus")
+    .reduce((a: number, f: any) => a + (Number(f.minutes) || 0), 0);
+  const monthKey = today.slice(0, 7);
+  const spentMonth = transactions
+    .filter((t) => t.kind === "expense" && t.date?.startsWith(monthKey))
+    .reduce((a: number, t: any) => a + (Number(t.amount) || 0), 0);
 
-  const concierge = useMemo(() => {
-    const parts: string[] = [];
-    if (lastSleep?.data?.hours) {
-      const h = Number(lastSleep.data.hours);
-      parts.push(`you slept ${h.toFixed(1)}h ${lastSleep.date === today ? "last night" : "on " + lastSleep.date}`);
-    }
-    if (healthToday.length === 0) {
-      parts.push("nothing logged yet today — a meal, a walk, or some water is a good start");
-    }
-    if (unread > 0) parts.push(`${unread} unread email${unread > 1 ? "s" : ""} in your inbox`);
-    if (weather) parts.push(`${Math.round(weather.temp)}° and ${weather.desc.toLowerCase()} outside`);
-    if (activeDl > 0) parts.push(`${activeDl} download${activeDl > 1 ? "s" : ""} in progress`);
-    if (parts.length === 0) parts.push("everything is quiet — take a moment for yourself");
-    const greet = `${greeting(now)}, ${profile.name || "friend"}.`;
-    return `${greet} ${parts[0][0].toUpperCase()}${parts.slice(0, 2).join(". ").slice(1)}.`;
-  }, [now, lastSleep, healthToday.length, unread, weather, activeDl, profile.name, today]);
+  const loadBriefing = useCallback(async (force = false) => {
+    setBriefingBusy(true);
+    const b = await generateBriefing(force);
+    setBriefing(b);
+    setBriefingBusy(false);
+  }, []);
+
+  useEffect(() => {
+    void loadBriefing();
+  }, [loadBriefing]);
 
   return (
     <div>
@@ -126,10 +127,37 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Concierge */}
+      {/* Briefing */}
       <div className="quiet-card mt-8 p-5">
-        <p className="microlabel">Concierge</p>
-        <p className="mt-2 max-w-3xl text-[15px] leading-relaxed text-foreground/90">{concierge}</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="microlabel">Briefing</p>
+          <div className="flex items-center gap-2">
+            {briefing?.fromAi && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Sparkles className="h-3 w-3" /> {aiCfg.model || "AI"}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void loadBriefing(true)}
+              disabled={briefingBusy}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent"
+              title="Regenerate briefing"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${briefingBusy ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
+        {briefing ? (
+          <p className="mt-2 max-w-3xl text-[15px] leading-relaxed text-foreground/90">{briefing.text}</p>
+        ) : (
+          <p className="mt-3 h-4 w-2/3 animate-pulse rounded bg-muted" />
+        )}
+        {!aiCfg.enabled && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Composed on-device. Add an AI key in Settings → AI companion for a model-written briefing.
+          </p>
+        )}
       </div>
 
       {/* Stats */}
@@ -140,10 +168,11 @@ export default function Dashboard() {
         <StatCard label="Health today" value={String(healthToday.length)} sub={`${activeDl} downloads running`} />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Media" value={String(mediaCount)} sub="music · films · books" />
+        <StatCard label="Focus today" value={`${focusToday}m`} sub="deep work" />
+        <StatCard label="Spent this month" value={`$${spentMonth.toFixed(0)}`} sub="tracked expenses" />
         <StatCard label="Storage" value={fmtBytes(storage)} sub="media only" />
-        <StatCard label="Unread mail" value={String(unread)} sub={emails.length > 0 ? "from Gmail" : "not connected"} />
       </div>
 
       {/* Quick actions */}

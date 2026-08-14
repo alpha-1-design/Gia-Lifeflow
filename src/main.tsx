@@ -22,6 +22,10 @@ const Movies = lazy(() => import("./pages/app/Movies.tsx"));
 const Books = lazy(() => import("./pages/app/Books.tsx"));
 const Reader = lazy(() => import("./pages/app/Reader.tsx"));
 const Health = lazy(() => import("./pages/app/Health.tsx"));
+const Focus = lazy(() => import("./pages/app/Focus.tsx"));
+const Finance = lazy(() => import("./pages/app/Finance.tsx"));
+const Habits = lazy(() => import("./pages/app/Habits.tsx"));
+const Companion = lazy(() => import("./pages/app/Companion.tsx"));
 const Mail = lazy(() => import("./pages/app/Mail.tsx"));
 const Chat = lazy(() => import("./pages/app/Chat.tsx"));
 const Browser = lazy(() => import("./pages/app/Browser.tsx"));
@@ -143,6 +147,10 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="books" element={<Books />} />
                 <Route path="books/:id" element={<Reader />} />
                 <Route path="health" element={<Health />} />
+                <Route path="focus" element={<Focus />} />
+                <Route path="finance" element={<Finance />} />
+                <Route path="habits" element={<Habits />} />
+                <Route path="companion" element={<Companion />} />
                 <Route path="mail" element={<Mail />} />
                 <Route path="chat" element={<Chat />} />
                 <Route path="browser" element={<Browser />} />

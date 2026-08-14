@@ -14,9 +14,13 @@ import {
   Moon,
   Music,
   NotebookPen,
+  Repeat2,
   Settings as SettingsIcon,
   Shield,
+  Sparkles,
   Sun,
+  Timer,
+  Wallet,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
@@ -35,6 +39,7 @@ const EMPTY_SECURITY = { lockEnabled: false, lockKey: null as { credentialId: st
 
 const NAV = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/companion", label: "Companion", icon: Sparkles },
   { to: "/app/notes", label: "Notes", icon: FileText },
   { to: "/app/diary", label: "Diary", icon: NotebookPen },
   { to: "/app/photos", label: "Photos", icon: Images },
@@ -43,6 +48,9 @@ const NAV = [
   { to: "/app/movies", label: "Movies", icon: Clapperboard },
   { to: "/app/books", label: "Books", icon: Library },
   { to: "/app/health", label: "Health", icon: HeartPulse },
+  { to: "/app/focus", label: "Focus", icon: Timer },
+  { to: "/app/finance", label: "Finance", icon: Wallet },
+  { to: "/app/habits", label: "Habits", icon: Repeat2 },
   { to: "/app/mail", label: "Mail", icon: Mail },
   { to: "/app/chat", label: "Chat", icon: MessagesSquare },
   { to: "/app/browser", label: "Browser", icon: Globe },

@@ -1,4 +1,5 @@
 import {
+  Archive,
   Bell,
   Database,
   Download,
@@ -9,11 +10,12 @@ import {
   LogOut,
   Mail,
   Shield,
+  Sparkles,
   Sun,
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 
@@ -41,6 +43,8 @@ import {
 import { ensureNotificationPermission, testNotification } from "@/lib/notifications";
 import { fetchGithubStats, clearLiveCache } from "@/lib/clients";
 import { gmailRedirectUri, handleGoogleCallback, refreshIfNeeded, startGoogleAuth, type GoogleConn } from "@/lib/gmail";
+import { chatCompletion, DEFAULT_AI_CONFIG, type AiConfig } from "@/lib/ai";
+import { exportEncrypted, restoreFromFile } from "@/lib/backup";
 import {
   clearNativeCredentials,
   isMailBridgeAvailable,
@@ -96,12 +100,20 @@ export default function Settings() {
   const [newsFeeds, setNewsFeeds] = useSetting<string[]>("newsFeeds", []);
 
   const [appPw, setAppPw] = useSetting<typeof EMPTY_APP_PW>("googleAppPassword", EMPTY_APP_PW);
+  const [ai, setAi] = useSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);
 
   const [clientId, setClientId] = useState("");
   const [storage, setStorage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [secAvailable, setSecAvailable] = useState(false);
   const [nativeCreds, setNativeCreds] = useState<{ email: string; appPassword: string } | null>(null);
+
+  const [aiBusy, setAiBusy] = useState(false);
+  const [bkPass, setBkPass] = useState("");
+  const [bkPass2, setBkPass2] = useState("");
+  const [bkIncludeMedia, setBkIncludeMedia] = useState(true);
+  const [bkBusy, setBkBusy] = useState(false);
+  const [restorePass, setRestorePass] = useState("");
 
   useEffect(() => {
     void getStorageUsage().then(setStorage);
@@ -244,6 +256,55 @@ export default function Settings() {
     for (const s of stores) await clearStore(s);
     await clearLiveCache();
     window.location.reload();
+  };
+
+  const testAi = async () => {
+    if (!ai.apiKey.trim()) return toast("Enter an API key first");
+    setAiBusy(true);
+    try {
+      await chatCompletion(ai, [{ role: "user", content: "Reply with exactly: OK" }]);
+      toast("Connected — the model answered");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not reach the model");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const exportEncryptedBackup = async () => {
+    if (bkPass.length < 4) return toast("Choose a passphrase of at least 4 characters");
+    if (bkPass !== bkPass2) return toast("Passphrases don't match");
+    setBkBusy(true);
+    try {
+      const r = await exportEncrypted(bkPass, bkIncludeMedia);
+      toast(
+        r.skippedBlobs > 0
+          ? `Backup saved — ${r.embeddedBlobs} media embedded, ${r.skippedBlobs} large files kept as metadata`
+          : `Backup saved (${r.embeddedBlobs} media items included)`,
+      );
+      setBkPass("");
+      setBkPass2("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setBkBusy(false);
+    }
+  };
+
+  const restoreBackup = async (file: File) => {
+    if (!restorePass) return toast("Enter the backup passphrase");
+    if (!window.confirm("Restoring replaces ALL current data on this device with the backup. Continue?")) return;
+    setBkBusy(true);
+    try {
+      const r = await restoreFromFile(file, restorePass);
+      toast(`Restored ${r.restored.length} stores${r.blobsRestored > 0 ? ` + ${r.blobsRestored} media files` : ""}`);
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e) {
+      const err = e as Error;
+      toast(err.name === "OperationError" ? "Wrong passphrase or corrupted file" : err.message || "Restore failed");
+    } finally {
+      setBkBusy(false);
+    }
   };
 
   const handleCallback = async () => {
@@ -428,6 +489,50 @@ export default function Settings() {
           </div>
         </Section>
 
+        <Section icon={Sparkles} title="AI companion" desc="A model that can read what's on this device. The key goes only to the endpoint you choose.">
+          <Row label="Enable companion">
+            <input
+              type="checkbox"
+              checked={ai.enabled}
+              onChange={(e) => setAi({ ...ai, enabled: e.target.checked })}
+              className="h-4 w-4 accent-foreground"
+            />
+          </Row>
+          <Row label="API key">
+            <input
+              type="password"
+              value={ai.apiKey}
+              onChange={(e) => setAi({ ...ai, apiKey: e.target.value })}
+              placeholder="sk-…"
+              className={`${inputCls} max-w-sm`}
+            />
+          </Row>
+          <Row label="Base URL">
+            <input
+              value={ai.baseUrl}
+              onChange={(e) => setAi({ ...ai, baseUrl: e.target.value })}
+              placeholder="https://api.openai.com/v1"
+              className={`${inputCls} max-w-sm`}
+            />
+          </Row>
+          <Row label="Model">
+            <input
+              value={ai.model}
+              onChange={(e) => setAi({ ...ai, model: e.target.value })}
+              placeholder="gpt-4o-mini"
+              className={`${inputCls} max-w-[11rem]`}
+            />
+            <button type="button" onClick={() => void testAi()} disabled={aiBusy} className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-40">
+              {aiBusy ? "Testing…" : "Test"}
+            </button>
+          </Row>
+          <p className="pt-2 text-[11px] leading-relaxed text-muted-foreground">
+            Any OpenAI-compatible endpoint works — OpenAI, Groq, OpenRouter, Together, a local server. The key is stored
+            only on this device and is sent only to the base URL above. Offline, the dashboard briefing falls back to
+            on-device rules automatically.
+          </p>
+        </Section>
+
         <Section icon={Bell} title="Notifications" desc="Composed and fired on this device — never through a server.">
           <Row label="Daily briefing">
             <label className="flex items-center gap-2 text-sm">
@@ -491,11 +596,84 @@ export default function Settings() {
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={() => void exportData()} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent">
-              <Download className="h-3.5 w-3.5" /> Export data
+              <Download className="h-3.5 w-3.5" /> Export data (plain JSON)
             </button>
             <button type="button" onClick={() => void wipeAll()} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10">
               <Trash2 className="h-3.5 w-3.5" /> Erase everything
             </button>
+          </div>
+
+          <div className="mt-5 rounded-md border p-4">
+            <p className="text-sm font-medium">Encrypted backup</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Everything — notes, diary, photos, music, mail, chat, stats — in one passphrase-protected file
+              (AES-256-GCM, key derived on-device with 250k PBKDF2 rounds). No cloud, no account: the file is the
+              backup, and without the passphrase it is unreadable.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input
+                type="password"
+                value={bkPass}
+                onChange={(e) => setBkPass(e.target.value)}
+                placeholder="Passphrase"
+                className={`${inputCls} max-w-xs`}
+              />
+              <input
+                type="password"
+                value={bkPass2}
+                onChange={(e) => setBkPass2(e.target.value)}
+                placeholder="Repeat passphrase"
+                className={`${inputCls} max-w-xs`}
+              />
+            </div>
+            <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={bkIncludeMedia}
+                onChange={(e) => setBkIncludeMedia(e.target.checked)}
+                className="h-3.5 w-3.5 accent-foreground"
+              />
+              Include media files (photos, music, films — up to ~250 MB total; larger files are kept as metadata)
+            </label>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => void exportEncryptedBackup()}
+                disabled={bkBusy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Archive className="h-3.5 w-3.5" /> {bkBusy ? "Working…" : "Export encrypted backup (.lfb)"}
+              </button>
+            </div>
+            <div className="mt-4 border-t pt-4">
+              <p className="text-xs font-medium">Restore from backup</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="password"
+                  value={restorePass}
+                  onChange={(e) => setRestorePass(e.target.value)}
+                  placeholder="Backup passphrase"
+                  className={`${inputCls} max-w-xs`}
+                />
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent">
+                  Choose .lfb file
+                  <input
+                    type="file"
+                    accept=".lfb,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void restoreBackup(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Restoring replaces everything currently on this device. Device-lock credentials never travel in
+                backups.
+              </p>
+            </div>
           </div>
         </Section>
 
