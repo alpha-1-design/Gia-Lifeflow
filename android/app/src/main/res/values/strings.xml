@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lifeflow</string>
+    <string name="title_activity_main">Lifeflow</string>
+    <string name="package_name">com.lifeflow.app</string>
+    <string name="custom_url_scheme">com.lifeflow.app</string>
+</resources>

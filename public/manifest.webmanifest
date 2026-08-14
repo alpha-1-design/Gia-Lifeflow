@@ -1,0 +1,17 @@
+{
+  "name": "Lifeflow",
+  "short_name": "Lifeflow",
+  "description": "Your entire life, quietly organized. Offline-first and private.",
+  "start_url": "/app/dashboard",
+  "display": "standalone",
+  "background_color": "#f9f9f9",
+  "theme_color": "#f9f9f9",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
