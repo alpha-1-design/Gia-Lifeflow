@@ -24,6 +24,7 @@ android {
     }
     // JavaMail (android-mail + android-activation) both ship META-INF/NOTICE.md;
     // without this the APK build fails with a duplicate-resource error.
+    // (Verified green in CI — bare paths match the merged jar resources.)
     packaging {
         resources {
             excludes += ['META-INF/NOTICE.md', 'META-INF/LICENSE', 'META-INF/LICENSE.md', 'META-INF/DEPENDENCIES']

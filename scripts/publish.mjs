@@ -163,8 +163,14 @@ async function pool(items, worker, size = 4) {
   async function run() {
     while (next < items.length) {
       const i = next++;
-      await new Promise((r) => setTimeout(r, i * 120)); // gentle stagger
+      // Small CONSTANT stagger: with blob dedupe most requests are cheap GETs,
+      // so an index-proportional delay only drags the run out (the last worker
+      // would sleep seconds between every request).
+      await new Promise((r) => setTimeout(r, 120));
       results[i] = await worker(items[i], i);
+      if ((i + 1) % 25 === 0 || i === items.length - 1) {
+        console.log(`  blobs: ${i + 1}/${items.length}`);
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, run));
@@ -186,8 +192,8 @@ function gitBlobSha(content) {
 }
 
 async function createBlobWithRetry(f, attempt = 0) {
+  const content = readFileSync(f.abs);
   try {
-    const content = readFileSync(f.abs);
     const sha = gitBlobSha(content);
     const existing = await gh(`/repos/${me.login}/${REPO_NAME}/git/blobs/${sha}`);
     if (existing?.sha === sha) return { path: f.rel, sha }; // already there
