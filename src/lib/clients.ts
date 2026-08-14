@@ -149,10 +149,12 @@ export const DEFAULT_FEEDS = [
   "https://techcrunch.com/feed/",
 ] as const;
 
-const parser = new Parser({
-  timeout: 9000,
-  headers: { "user-agent": "lifeflow/1.0 (+local-first)" },
-});
+function makeParser() {
+  return new Parser({
+    timeout: 9000,
+    headers: { "user-agent": "lifeflow/1.0 (+local-first)" },
+  });
+}
 
 function sourceOf(url: string): string {
   try {
@@ -165,7 +167,7 @@ function sourceOf(url: string): string {
 async function parseFeedXml(xml: string, source: string): Promise<NewsItem[]> {
   let feed;
   try {
-    feed = await parser.parseString(xml);
+    feed = await makeParser().parseString(xml);
   } catch {
     feed = null;
   }
