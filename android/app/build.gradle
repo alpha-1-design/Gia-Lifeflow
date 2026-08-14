@@ -22,6 +22,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // JavaMail (android-mail + android-activation) both ship META-INF/NOTICE.md;
+    // without this the APK build fails with a duplicate-resource error.
+    packaging {
+        resources {
+            excludes += ['META-INF/NOTICE.md', 'META-INF/LICENSE', 'META-INF/LICENSE.md', 'META-INF/DEPENDENCIES']
+        }
+    }
 }
 
 repositories {
