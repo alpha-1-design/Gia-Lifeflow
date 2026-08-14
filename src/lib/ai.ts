@@ -22,9 +22,51 @@ export interface AiConfig {
 export const DEFAULT_AI_CONFIG: AiConfig = {
   enabled: false,
   apiKey: "",
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
+  baseUrl: "https://openrouter.ai/api/v1",
+  model: "openrouter/auto",
 };
+
+/** One-click provider presets (all OpenAI-compatible chat completions). */
+export const AI_PROVIDERS = [
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openrouter/auto",
+    hint: "Key from openrouter.ai/keys. Routes to the best model for each request; hundreds of models, several free.",
+  },
+  {
+    id: "zen",
+    label: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    model: "kimi-k2.7-code",
+    hint: "Key from opencode.ai/zen. Curated, benchmarked models — including free ones like deepseek-v4-flash-free and nemotron-3-ultra-free.",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    hint: "Key from platform.openai.com/api-keys.",
+  },
+  {
+    id: "custom",
+    label: "Custom endpoint",
+    baseUrl: "",
+    model: "",
+    hint: "Any OpenAI-compatible server — a local model (LM Studio, Ollama), Together, Groq…",
+  },
+] as const;
+
+export type AiProviderId = (typeof AI_PROVIDERS)[number]["id"];
+
+export function providerIdFor(baseUrl: string): AiProviderId {
+  const b = baseUrl.trim().toLowerCase();
+  if (b.includes("openrouter")) return "openrouter";
+  if (b.includes("opencode.ai")) return "zen";
+  if (b.includes("openai.com")) return "openai";
+  return "custom";
+}
 
 export async function getAiConfig(): Promise<AiConfig> {
   return getSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);

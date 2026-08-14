@@ -43,7 +43,7 @@ import {
 import { ensureNotificationPermission, testNotification } from "@/lib/notifications";
 import { fetchGithubStats, clearLiveCache } from "@/lib/clients";
 import { gmailRedirectUri, handleGoogleCallback, refreshIfNeeded, startGoogleAuth, type GoogleConn } from "@/lib/gmail";
-import { chatCompletion, DEFAULT_AI_CONFIG, type AiConfig } from "@/lib/ai";
+import { AI_PROVIDERS, chatCompletion, DEFAULT_AI_CONFIG, providerIdFor, type AiConfig } from "@/lib/ai";
 import { exportEncrypted, restoreFromFile } from "@/lib/backup";
 import {
   clearNativeCredentials,
@@ -507,6 +507,20 @@ export default function Settings() {
               className={`${inputCls} max-w-sm`}
             />
           </Row>
+          <Row label="Provider">
+            <select
+              value={providerIdFor(ai.baseUrl)}
+              onChange={(e) => {
+                const p = AI_PROVIDERS.find((x) => x.id === e.target.value);
+                if (p) setAi({ ...ai, baseUrl: p.baseUrl, model: p.model });
+              }}
+              className={inputCls}
+            >
+              {AI_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+          </Row>
           <Row label="Base URL">
             <input
               value={ai.baseUrl}
@@ -527,9 +541,8 @@ export default function Settings() {
             </button>
           </Row>
           <p className="pt-2 text-[11px] leading-relaxed text-muted-foreground">
-            Any OpenAI-compatible endpoint works — OpenAI, Groq, OpenRouter, Together, a local server. The key is stored
-            only on this device and is sent only to the base URL above. Offline, the dashboard briefing falls back to
-            on-device rules automatically.
+            {AI_PROVIDERS.find((p) => p.id === providerIdFor(ai.baseUrl))?.hint ??
+              "Any OpenAI-compatible endpoint works. The key is stored only on this device and is sent only to the base URL above. Offline, the dashboard briefing falls back to on-device rules automatically."}
           </p>
         </Section>
 
