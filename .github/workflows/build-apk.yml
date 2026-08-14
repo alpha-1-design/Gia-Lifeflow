@@ -9,6 +9,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Needed so the release step can create a GitHub Release and attach the APK
+# (the default token is read-only unless this is declared).
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
