@@ -5,7 +5,17 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
-const VlyToolbar = lazy(() => import("../vly-toolbar-readonly.tsx"));
+/**
+ * The preview toolbar is injected by the hosting platform and only exists in
+ * this workspace — it is not part of the public repo or the APK build. Load it
+ * lazily through a runtime variable so neither `tsc` nor `vite build` tries to
+ * resolve it; if the file is missing (GitHub Actions, APK) the import rejects
+ * and the toolbar simply renders nothing.
+ */
+const vlyToolbarSpec = "../vly-toolbar-readonly.tsx";
+const VlyToolbar = lazy(() =>
+  import(/* @vite-ignore */ vlyToolbarSpec).catch(() => ({ default: () => null })),
+);
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));

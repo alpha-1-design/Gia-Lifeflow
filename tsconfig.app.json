@@ -29,5 +29,7 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vly-toolbar-readonly.tsx"]
+  // vly-toolbar-readonly.tsx is a hosting-platform preview toolbar that is not
+  // part of this repo; src/main.tsx loads it defensively (or renders nothing).
+  "include": ["src"]
 }

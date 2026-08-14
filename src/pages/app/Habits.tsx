@@ -5,39 +5,14 @@ import { toast } from "sonner";
 import PageHeader from "@/components/app/PageHeader";
 import { useCollection, put, remove, type Habit, type HabitLog } from "@/lib/db";
 import { fmtFullDate, todayKey, uid } from "@/lib/format";
+import { habitStreak } from "@/lib/habits";
 
 const COLORS = ["#0f0f0f", "#525252", "#8a8a8a", "#6b7280", "#3f3f3f"];
 const ROUTINES = ["Morning", "Evening", "Any"] as const;
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const HEAT_DAYS = 84; // 12 weeks
 
-function isDue(h: Habit, key: string): boolean {
-  if (h.frequency === "custom") {
-    if (h.days.length === 0) return false;
-    return h.days.includes(new Date(`${key}T12:00:00`).getDay());
-  }
-  return true; // daily
-}
 
-function habitStreak(h: Habit, logs: Map<string, HabitLog[]>): number {
-  const done = new Set((logs.get(h.id) ?? []).map((l) => l.date));
-  const d = new Date();
-  if (isDue(h, todayKey(d)) && !done.has(todayKey(d))) return 0;
-  if (!done.has(todayKey(d))) d.setDate(d.getDate() - 1);
-  let n = 0;
-  let guard = 0;
-  while (guard++ < 500) {
-    const key = todayKey(d);
-    if (!isDue(h, key)) {
-      d.setDate(d.getDate() - 1);
-      continue;
-    }
-    if (!done.has(key)) break;
-    n++;
-    d.setDate(d.getDate() - 1);
-  }
-  return n;
-}
 
 export default function Habits() {
   const habits = useCollection<Habit>("habits");

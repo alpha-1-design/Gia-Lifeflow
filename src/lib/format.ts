@@ -104,8 +104,10 @@ export function filenameFromUrl(url: string): string {
 export function extOf(url: string): string {
   try {
     const u = new URL(url);
-    const seg = u.pathname.split(".").pop() || "";
-    return seg.toLowerCase().slice(0, 6);
+    const name = u.pathname.split("/").filter(Boolean).pop() || "";
+    if (!name.includes(".")) return "";
+    const ext = name.split(".").pop() || "";
+    return ext.toLowerCase().slice(0, 6);
   } catch {
     return "";
   }

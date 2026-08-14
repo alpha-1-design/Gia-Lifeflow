@@ -25,28 +25,7 @@ import PageHeader from "@/components/app/PageHeader";
 import { useCollection, put, remove, deleteBlob, saveBlob, blobUrl, type Movie, type DownloadTask } from "@/lib/db";
 import { fmtBytes, fmtDuration, filenameFromUrl, initialsOf, relativeTime, uid } from "@/lib/format";
 import { cancelDownload, deleteDownload, isDownloadActive, startDownload } from "@/lib/downloader";
-
-function cueTime(t: string): number {
-  const seg = t.trim().replace(",", ".").split(":").map((x) => Number(x));
-  if (seg.length >= 3) return seg[0] * 3600 + seg[1] * 60 + (seg[2] || 0);
-  return seg[0] * 60 + (seg[1] || 0);
-}
-
-function parseSubs(text: string): { start: number; end: number; text: string }[] {
-  const blocks = text.replace(/\r/g, "").split(/\n{2,}/);
-  const cues: { start: number; end: number; text: string }[] = [];
-  for (const block of blocks) {
-    const lines = block.split("\n");
-    const tl = lines.findIndex((l) => l.includes("-->"));
-    if (tl < 0) continue;
-    const [a, b] = lines[tl].split("-->");
-    const start = cueTime(a);
-    const end = cueTime(b);
-    const content = lines.slice(tl + 1).join("\n").trim();
-    if (content && start < end) cues.push({ start, end, text: content });
-  }
-  return cues;
-}
+import { parseSubs } from "@/lib/subtitles";
 
 function coverStyle(title: string): string {
   const hue = [...title].reduce((a, c) => a + c.charCodeAt(0), 0);

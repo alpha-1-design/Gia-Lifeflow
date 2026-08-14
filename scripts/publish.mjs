@@ -156,13 +156,14 @@ const files = walk(".");
 files.sort((a, b) => a.rel.localeCompare(b.rel));
 console.log(`Pushing ${files.length} files as a fresh commit on ${REPO_NAME}`);
 
-// ---------- 4. Create blobs (concurrency 8) ----------
-async function pool(items, worker, size = 8) {
+// ---------- 4. Create blobs (throttled, with rate-limit backoff) ----------
+async function pool(items, worker, size = 4) {
   const results = new Array(items.length);
   let next = 0;
   async function run() {
     while (next < items.length) {
       const i = next++;
+      await new Promise((r) => setTimeout(r, i * 120)); // gentle stagger
       results[i] = await worker(items[i], i);
     }
   }
@@ -170,15 +171,48 @@ async function pool(items, worker, size = 8) {
   return results;
 }
 
-const blobShas = await pool(files, async (f) => {
-  const b64 = readFileSync(f.abs).toString("base64");
-  const blob = await gh(`/repos/${me.login}/${REPO_NAME}/git/blobs`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: b64, encoding: "base64" }),
-  });
-  return { path: f.rel, sha: blob.sha };
-});
+const isRateLimited = (e) => /rate limit|abuse|403|429/i.test(String(e?.message ?? e));
+
+// GitHub blob IDs are content-addressed: sha1("blob <size>\0<content>"). We can
+// compute them locally and only POST blobs that don't already exist in the
+// repo — identical files across pushes are free, which keeps us off the
+// secondary rate limits almost entirely.
+import { createHash } from "node:crypto";
+function gitBlobSha(content) {
+  return createHash("sha1")
+    .update(`blob ${content.length}\0`)
+    .update(content)
+    .digest("hex");
+}
+
+async function createBlobWithRetry(f, attempt = 0) {
+  try {
+    const content = readFileSync(f.abs);
+    const sha = gitBlobSha(content);
+    const existing = await gh(`/repos/${me.login}/${REPO_NAME}/git/blobs/${sha}`);
+    if (existing?.sha === sha) return { path: f.rel, sha }; // already there
+  } catch {
+    /* 404 — need to create it */
+  }
+  try {
+    const b64 = content.toString("base64");
+    const blob = await gh(`/repos/${me.login}/${REPO_NAME}/git/blobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: b64, encoding: "base64" }),
+    });
+    return { path: f.rel, sha: blob.sha };
+  } catch (e) {
+    if (isRateLimited(e) && attempt < 3) {
+      console.log("Secondary rate limit — pausing 60s, then retrying…");
+      await new Promise((r) => setTimeout(r, 60_000));
+      return createBlobWithRetry(f, attempt + 1);
+    }
+    throw e;
+  }
+}
+
+const blobShas = await pool(files, (f) => createBlobWithRetry(f, 0));
 
 // ---------- 5. Build the tree ----------
 const tree = await gh(`/repos/${me.login}/${REPO_NAME}/git/trees`, {
