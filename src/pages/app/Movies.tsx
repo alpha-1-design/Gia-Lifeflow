@@ -3,12 +3,12 @@ import {
   Clapperboard,
   Download,
   Film,
+  HardDrive,
   Maximize,
   Minimize,
   Pause,
   PictureInPicture2,
   Play,
-  Plus,
   RotateCcw,
   RotateCw,
   Search,
@@ -21,11 +21,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import DownloadForm from "@/components/app/DownloadForm";
+import FreeLibraryBrowser from "@/components/app/FreeLibraryBrowser";
 import PageHeader from "@/components/app/PageHeader";
 import { useCollection, put, remove, deleteBlob, saveBlob, blobUrl, type Movie, type DownloadTask } from "@/lib/db";
-import { fmtBytes, fmtDuration, filenameFromUrl, initialsOf, relativeTime, uid } from "@/lib/format";
-import { cancelDownload, deleteDownload, isDownloadActive, startDownload } from "@/lib/downloader";
+import { fmtBytes, fmtDuration, initialsOf, relativeTime, uid } from "@/lib/format";
+import { cancelDownload, deleteDownload, isDownloadActive } from "@/lib/downloader";
 import { parseSubs } from "@/lib/subtitles";
+import { isMediaLibraryAvailable, scanLibrary, importLibraryItem, type LibraryItem } from "@/lib/medialibrary";
 
 function coverStyle(title: string): string {
   const hue = [...title].reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -35,9 +38,7 @@ function coverStyle(title: string): string {
 export default function Movies() {
   const movies = useCollection<Movie>("movies");
   const downloads = useCollection<DownloadTask>("downloads");
-  const [tab, setTab] = useState<"library" | "downloads">("library");
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
+  const [tab, setTab] = useState<"library" | "downloads" | "browse">("library");
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
@@ -49,6 +50,8 @@ export default function Movies() {
   const [controlsOn, setControlsOn] = useState(true);
   const [isFs, setIsFs] = useState(false);
   const [query, setQuery] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [deviceItems, setDeviceItems] = useState<LibraryItem[] | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fsRef = useRef<HTMLDivElement | null>(null);
@@ -338,6 +341,42 @@ export default function Movies() {
     if (added > 0) toast(`${added} film${added > 1 ? "s" : ""} imported`);
   };
 
+  const scanDevice = async () => {
+    setScanning(true);
+    try {
+      const items = await scanLibrary("video");
+      setDeviceItems(items);
+      if (items.length === 0) toast("No videos found on this device");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not scan the device library");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const importFromLibrary = async (item: LibraryItem) => {
+    try {
+      const url = await importLibraryItem(item);
+      if (!url) return;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobId = await saveBlob(blob, item.mime || "video/mp4");
+      await put<Movie>("movies", {
+        id: uid(),
+        title: item.name.replace(/\.[a-z0-9]+$/i, ""),
+        blobId,
+        duration: item.duration || 0,
+        createdAt: Date.now(),
+        source: "device",
+        progress: 0,
+      });
+      toast(`Added ${item.name}`);
+    } catch {
+      toast("Couldn't import that file");
+    }
+  };
+
   const attachSubs = async (m: Movie, file: File) => {
     const text = await file.text();
     if (!text.includes("-->")) return toast("That doesn't look like a subtitle file (.srt or .vtt)");
@@ -420,6 +459,13 @@ export default function Movies() {
             >
               Downloads
             </button>
+            <button
+              type="button"
+              onClick={() => setTab("browse")}
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${tab === "browse" ? "bg-foreground text-background" : "hover:bg-accent"}`}
+            >
+              Browse
+            </button>
           </div>
         }
       />
@@ -435,10 +481,56 @@ export default function Movies() {
               </div>
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent">
                 <Upload className="h-3.5 w-3.5" /> Import
-                <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => { void importFiles(e.target.files); e.target.value = ""; }} />
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => { void importFiles((e.target as HTMLInputElement).files); e.target.value = ""; }}
+                />
               </label>
+              {isMediaLibraryAvailable() && (
+                <button
+                  type="button"
+                  onClick={() => void scanDevice()}
+                  disabled={scanning}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-40"
+                >
+                  <HardDrive className="h-3.5 w-3.5" /> {scanning ? "Scanning…" : "Scan device"}
+                </button>
+              )}
             </div>
           </div>
+
+          {deviceItems !== null && (
+            <div className="mb-4 rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="microlabel">On your device · {deviceItems.length}</p>
+                <button type="button" onClick={() => setDeviceItems(null)} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  Close
+                </button>
+              </div>
+              {deviceItems.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">No videos found.</p>
+              ) : (
+                <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                  {deviceItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border p-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{item.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {fmtDuration(item.duration)} · {fmtBytes(item.size)}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => void importFromLibrary(item)} className="shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {filtered.length === 0 ? (
             <div className="quiet-card flex flex-col items-center p-12 text-center">
@@ -579,22 +671,7 @@ export default function Movies() {
           <div className="quiet-card p-5">
             <p className="microlabel">Accelerated download</p>
             <p className="mt-1 mb-4 text-xs text-muted-foreground">Parallel chunked downloads with resume — faster than a single stream.</p>
-            <div className="flex flex-wrap gap-2">
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/film.mp4" className="min-w-0 flex-1 rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-44 rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
-              <button
-                type="button"
-                disabled={!url.trim()}
-                onClick={() => {
-                  void startDownload({ url: url.trim(), kind: "movie", title: title.trim() || filenameFromUrl(url) });
-                  setUrl("");
-                  setTitle("");
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                <Plus className="h-4 w-4" /> Start
-              </button>
-            </div>
+            <DownloadForm kind="movie" urlPlaceholder="https://…/film.mp4" />
           </div>
 
           <div className="mt-5 space-y-2">
@@ -609,7 +686,8 @@ export default function Movies() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="font-mono text-xs text-muted-foreground tabular-nums">
-                      {d.total > 0 ? `${fmtBytes(d.total * d.progress)} / ${fmtBytes(d.total)}` : ""}
+                      {d.total > 0 ? `${fmtBytes(d.received ?? d.total * d.progress)} / ${fmtBytes(d.total)}` : ""}
+                      {d.speed ? ` · ${fmtBytes(d.speed)}/s` : ""}
                     </span>
                     {isDownloadActive(d.id) ? (
                       <button type="button" onClick={() => cancelDownload(d.id)} className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">Cancel</button>
@@ -632,6 +710,12 @@ export default function Movies() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === "browse" && (
+        <div className="quiet-card p-5">
+          <FreeLibraryBrowser kind="movie" />
         </div>
       )}
     </div>

@@ -29,6 +29,7 @@ const STORES = [
   "cache", // { key, value, ts }
   "emails", // EmailItem
   "browser", // BrowserEntry
+  "browserHistory", // BrowserHistoryEntry
   "aiChat", // AiMessage
   "playlists", // Playlist
   "focus", // FocusSession
@@ -36,13 +37,15 @@ const STORES = [
   "budgets", // Budget
   "habits", // Habit
   "habitLogs", // HabitLog
+  "places", // Place
+  "tiles", // TileRecord (offline map cache)
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 export function db(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, 2, {
+    dbPromise = openDB(DB_NAME, 4, {
       upgrade(d) {
         for (const s of STORES) {
           if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
@@ -170,6 +173,11 @@ export interface DownloadTask {
   createdAt: number;
   blobId?: string;
   error?: string;
+  headers?: Record<string, string>; // optional request headers (e.g. Authorization)
+  useRelay?: boolean; // fall back to a public CORS relay if the site blocks direct fetch
+  finalName?: string; // filename from Content-Disposition, when the server provides one
+  received?: number; // bytes downloaded so far
+  speed?: number; // bytes/sec, latest sample
 }
 
 export interface CacheEntry {
@@ -198,11 +206,29 @@ export interface BrowserEntry {
   visitedAt: number;
 }
 
+export interface BrowserHistoryEntry {
+  id: string;
+  url: string;
+  title: string;
+  visitedAt: number;
+}
+
+export interface AiAttachment {
+  name: string;
+  mime: string;
+  kind: "image" | "text";
+  dataUrl?: string; // images, base64 data URL
+  text?: string; // text files
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   ts: number;
+  attachments?: AiAttachment[];
+  /** Web-search results backing an assistant answer (clickable citations). */
+  sources?: { title: string; url: string }[];
 }
 
 export interface Playlist {
@@ -253,6 +279,17 @@ export interface HabitLog {
   habitId: string;
   date: string; // YYYY-MM-DD
   completedAt: number;
+}
+
+export interface Place {
+  id: string;
+  name: string;
+  note: string; // memory / description
+  tags: string[];
+  lat: number;
+  lng: number;
+  photoBlobIds: string[];
+  createdAt: number;
 }
 
 /* --------------------------- reactive store ---------------------------- */

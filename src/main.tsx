@@ -1,9 +1,21 @@
+import { Capacitor } from "@capacitor/core";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "next-themes";
 import React, { lazy, Suspense, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+
+// Register the offline service worker (web PWA only — the Capacitor native
+// build serves the app from a custom scheme and doesn't need it). Caching is
+// best-effort: if it fails, the app simply loads from the network as before.
+if (import.meta.env.PROD && "serviceWorker" in navigator && !Capacitor.isNativePlatform()) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* offline caching is best-effort */
+    });
+  });
+}
 
 /**
  * The preview toolbar is injected by the hosting platform and only exists in
@@ -40,6 +52,7 @@ const Mail = lazy(() => import("./pages/app/Mail.tsx"));
 const Chat = lazy(() => import("./pages/app/Chat.tsx"));
 const Browser = lazy(() => import("./pages/app/Browser.tsx"));
 const Settings = lazy(() => import("./pages/app/Settings.tsx"));
+const Places = lazy(() => import("./pages/app/Places.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -165,6 +178,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="chat" element={<Chat />} />
                 <Route path="browser" element={<Browser />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="places" element={<Places />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

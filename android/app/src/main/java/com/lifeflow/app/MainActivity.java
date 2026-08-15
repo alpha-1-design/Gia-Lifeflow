@@ -7,8 +7,10 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // Local plugin: Gmail IMAP/SMTP for Google app passwords.
+        // Local plugins: Gmail IMAP/SMTP for Google app passwords, and the
+        // on-device media library scanner (Music/Movies modules).
         registerPlugin(MailBridgePlugin.class);
+        registerPlugin(MediaLibraryPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

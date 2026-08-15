@@ -27,17 +27,23 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test
 
       - name: Typecheck + build web app
-        run: bun run build
+        run: npm run build
 
       - name: Sync Capacitor (web → native)
-        run: bunx cap sync android
+        run: npx cap sync android
 
       - name: Build debug APK
         run: |

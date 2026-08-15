@@ -17,6 +17,8 @@ export interface AiConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export const DEFAULT_AI_CONFIG: AiConfig = {
@@ -68,39 +70,202 @@ export function providerIdFor(baseUrl: string): AiProviderId {
   return "custom";
 }
 
+export interface ModelEntry {
+  id: string;
+  label: string;
+  vision?: boolean;
+}
+
+/** Curated model lists so you can switch models with a tap (no network needed). */
+export const MODEL_CATALOG: Record<AiProviderId, ModelEntry[]> = {
+  openrouter: [
+    { id: "openrouter/auto", label: "Auto — best per request" },
+    { id: "openai/gpt-4o", label: "GPT-4o", vision: true },
+    { id: "openai/gpt-4o-mini", label: "GPT-4o mini", vision: true },
+    { id: "openai/gpt-4.1", label: "GPT-4.1", vision: true },
+    { id: "openai/o3-mini", label: "o3-mini" },
+    { id: "anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet", vision: true },
+    { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", vision: true },
+    { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", vision: true },
+    { id: "google/gemini-2.0-flash-001", label: "Gemini 2.0 Flash", vision: true },
+    { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
+    { id: "deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3" },
+    { id: "qwen/qwen2.5-72b-instruct", label: "Qwen 2.5 72B" },
+  ],
+  zen: [
+    { id: "kimi-k2.7-code", label: "Kimi K2.7 Code" },
+    { id: "deepseek-v4-flash-free", label: "DeepSeek V4 Flash (free)" },
+    { id: "nemotron-3-ultra-free", label: "Nemotron 3 Ultra (free)" },
+  ],
+  openai: [
+    { id: "gpt-4o", label: "GPT-4o", vision: true },
+    { id: "gpt-4o-mini", label: "GPT-4o mini", vision: true },
+    { id: "gpt-4.1", label: "GPT-4.1", vision: true },
+    { id: "gpt-4.1-mini", label: "GPT-4.1 mini", vision: true },
+    { id: "o3-mini", label: "o3-mini" },
+    { id: "o4-mini", label: "o4-mini", vision: true },
+  ],
+  custom: [],
+};
+
+/** Human label for the currently configured model (falls back to the raw id). */
+export function modelLabel(config: AiConfig): string {
+  const entry = (MODEL_CATALOG[providerIdFor(config.baseUrl)] ?? []).find((m) => m.id === config.model);
+  return entry?.label ?? (config.model || "Custom model");
+}
+
 export async function getAiConfig(): Promise<AiConfig> {
   return getSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);
 }
 
-export type AiTurn = { role: "system" | "user" | "assistant"; content: string };
+export type AiContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
-/** One completion against the configured endpoint. Throws on failure. */
-export async function chatCompletion(config: AiConfig, messages: AiTurn[]): Promise<string> {
-  if (!config.apiKey.trim()) throw new Error("No API key configured");
+/** A turn's content: plain text, or OpenAI-style multimodal content parts. */
+export type AiContent = string | AiContentPart[];
+
+export type AiTurn = { role: "system" | "user" | "assistant"; content: AiContent };
+
+export interface ChatOptions {
+  /** Stream tokens as they arrive instead of waiting for the whole reply. */
+  onDelta?: (delta: string) => void;
+  /** Override the request timeout (ms). */
+  timeoutMs?: number;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function aiHeaders(config: AiConfig): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${config.apiKey.trim()}`,
+  };
+}
+
+function aiBody(config: AiConfig, messages: AiTurn[], stream: boolean) {
+  return {
+    model: config.model || "gpt-4o-mini",
+    messages,
+    temperature: config.temperature ?? 0.7,
+    max_tokens: config.maxTokens ?? 700,
+    ...(stream ? { stream: true } : {}),
+  };
+}
+
+function describeAiError(status: number, text: string): string {
+  const t = text.slice(0, 180);
+  if (status === 401) return "Invalid API key (401) — check Settings → AI companion.";
+  if (status === 402 || status === 429) return "Rate limit or quota reached (429/402) — try again shortly or switch model.";
+  if (status === 404) return "Model not found (404) — check the model name.";
+  if (status >= 500) return `Provider error (${status}) — try again in a moment.`;
+  return `AI request failed (${status})${t ? ` — ${t}` : ""}`;
+}
+
+/** Retries transient network/5xx/429 failures a few times before giving up. */
+async function completionNonStream(config: AiConfig, messages: AiTurn[], timeoutMs?: number): Promise<string> {
   const base = config.baseUrl.trim().replace(/\/+$/, "");
-  if (!base) throw new Error("No API base URL configured");
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers: aiHeaders(config),
+        body: JSON.stringify(aiBody(config, messages, false)),
+        signal: AbortSignal.timeout(timeoutMs ?? 60_000),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        const err = new Error(describeAiError(res.status, text));
+        if (res.status === 429 || res.status >= 500) {
+          lastErr = err;
+          await sleep(500 * (attempt + 1));
+          continue;
+        }
+        throw err;
+      }
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) throw new Error("The model returned an empty response");
+      return content;
+    } catch (err) {
+      const transient = err instanceof TypeError || (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError"));
+      if (attempt < 2 && transient) {
+        lastErr = err instanceof Error ? err : new Error("Network error");
+        await sleep(500 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr ?? new Error("AI request failed");
+}
+
+/** Extracts the text delta from a single SSE `data:` payload. */
+function parseSseDelta(payload: string): string {
+  try {
+    const json = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
+    return json.choices?.[0]?.delta?.content ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Streams an OpenAI-compatible SSE response, calling onDelta per token. */
+async function completionStream(config: AiConfig, messages: AiTurn[], onDelta: (d: string) => void, timeoutMs?: number): Promise<string> {
+  const base = config.baseUrl.trim().replace(/\/+$/, "");
   const res = await fetch(`${base}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey.trim()}`,
-    },
-    body: JSON.stringify({
-      model: config.model || "gpt-4o-mini",
-      messages,
-      temperature: 0.7,
-      max_tokens: 700,
-    }),
-    signal: AbortSignal.timeout(60_000),
+    headers: aiHeaders(config),
+    body: JSON.stringify(aiBody(config, messages, true)),
+    signal: AbortSignal.timeout(timeoutMs ?? 120_000),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`AI request failed (${res.status})${text ? ` — ${text.slice(0, 180)}` : ""}`);
+    throw new Error(describeAiError(res.status, text));
   }
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("The model returned an empty response");
-  return content;
+  if (!res.body) throw new Error("This endpoint doesn't support streaming");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+  const emit = (payload: string) => {
+    if (payload === "[DONE]") return;
+    const delta = parseSseDelta(payload);
+    if (delta) {
+      full += delta;
+      onDelta(delta);
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      emit(trimmed.slice(5).trim());
+    }
+  }
+  const tail = buffer.trim();
+  if (tail.startsWith("data:")) emit(tail.slice(5).trim());
+  return full.trim();
+}
+
+/**
+ * One completion against the configured endpoint. Pass `onDelta` to stream
+ * tokens as they arrive; otherwise the full reply is awaited (with retries).
+ */
+export async function chatCompletion(config: AiConfig, messages: AiTurn[], opts: ChatOptions = {}): Promise<string> {
+  if (!config.apiKey.trim()) throw new Error("No API key configured");
+  const base = config.baseUrl.trim().replace(/\/+$/, "");
+  if (!base) throw new Error("No API base URL configured");
+  if (opts.onDelta) return completionStream(config, messages, opts.onDelta, opts.timeoutMs);
+  return completionNonStream(config, messages, opts.timeoutMs);
 }
 
 /* --------------------------- life context ----------------------------- */
@@ -273,18 +438,52 @@ export async function generateBriefing(force = false): Promise<{ text: string; f
   return out;
 }
 
+/** Options for the Companion's reply — extends ChatOptions with web search. */
+export interface CompanionOptions extends ChatOptions {
+  /** Pre-formatted live web-search results (from Exa) to ground the answer. */
+  webContext?: string;
+}
+
+/** Turn a stored message into OpenAI-style content, including any attachments. */
+function messageContent(m: AiMessage): AiContent {
+  const atts = m.attachments ?? [];
+  if (atts.length === 0) return m.content;
+  const parts: AiContentPart[] = [];
+  if (m.content.trim()) parts.push({ type: "text", text: m.content });
+  for (const a of atts) {
+    if (a.kind === "image" && a.dataUrl) {
+      parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
+    } else if (a.kind === "text" && a.text) {
+      parts.push({ type: "text", text: `\n[Attached file: ${a.name}]\n\`\`\`\n${a.text}\n\`\`\`` });
+    }
+  }
+  if (parts.length === 0) return m.content || "";
+  if (parts.length === 1 && parts[0].type === "text") return parts[0].text;
+  return parts;
+}
+
 /** Chat with full context attached — used by the Companion page. */
-export async function companionReply(messages: AiMessage[], includeContext: boolean): Promise<string> {
+export async function companionReply(messages: AiMessage[], includeContext: boolean, opts?: CompanionOptions): Promise<string> {
   const config = await getAiConfig();
   const turns: AiTurn[] = [{ role: "system", content: SYSTEM_PROMPT }];
   if (includeContext) {
     const ctx = await gatherContext();
     turns.push({ role: "system", content: `Current on-device context:\n${describeContext(ctx)}` });
   }
-  for (const m of messages.slice(-16)) {
-    turns.push({ role: m.role, content: m.content });
+  if (opts?.webContext) {
+    turns.push({
+      role: "system",
+      content: [
+        "Live web-search results (from Exa). Use them to answer factually and cite sources where it helps.",
+        "If they don't answer the question, say so rather than guessing.",
+        opts.webContext,
+      ].join("\n"),
+    });
   }
-  return chatCompletion(config, turns);
+  for (const m of messages.slice(-16)) {
+    turns.push({ role: m.role, content: messageContent(m) });
+  }
+  return chatCompletion(config, turns, opts);
 }
 
 /** Persisted conversation history (the aiChat store). */

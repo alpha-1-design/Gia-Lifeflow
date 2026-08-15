@@ -1,14 +1,14 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * verify-push.mjs — Check what actually landed in the GitHub repo.
- * Usage: GH_TOKEN=<token> bun scripts/verify-push.mjs <commit-sha>
+ * Usage: GH_TOKEN=<token> node scripts/verify-push.mjs <commit-sha>
  */
 const TOKEN = process.env.GH_TOKEN;
 const OWNER = process.env.GH_OWNER || "alpha-1-design";
 const REPO = process.env.GH_REPO || "Gia-Lifeflow";
 const SHA = process.argv[2];
 if (!TOKEN || !SHA) {
-  console.error("Usage: GH_TOKEN=<token> bun scripts/verify-push.mjs <commit-sha>");
+  console.error("Usage: GH_TOKEN=<token> node scripts/verify-push.mjs <commit-sha>");
   process.exit(1);
 }
 
@@ -32,7 +32,7 @@ console.log("forbidden entries found:", bad.length ? bad : "none");
 // Things that MUST be in the repo
 const required = [
   "package.json",
-  "bun.lock",
+  "package-lock.json",
   "README.md",
   "capacitor.config.ts",
   "index.html",

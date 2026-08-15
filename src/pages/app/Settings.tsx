@@ -15,7 +15,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 
@@ -25,12 +25,10 @@ import {
   db,
   useSetting,
   setSetting,
-  removeSetting,
   saveBlob,
   deleteBlob,
   getStorageUsage,
   clearStore,
-  getAll,
   type Profile,
 } from "@/lib/db";
 import { fmtBytes } from "@/lib/format";
@@ -42,8 +40,9 @@ import {
 } from "@/lib/webauthn";
 import { ensureNotificationPermission, testNotification } from "@/lib/notifications";
 import { fetchGithubStats, clearLiveCache } from "@/lib/clients";
-import { gmailRedirectUri, handleGoogleCallback, refreshIfNeeded, startGoogleAuth, type GoogleConn } from "@/lib/gmail";
+import { gmailRedirectUri, handleGoogleCallback, startGoogleAuth, type GoogleConn } from "@/lib/gmail";
 import { AI_PROVIDERS, chatCompletion, DEFAULT_AI_CONFIG, providerIdFor, type AiConfig } from "@/lib/ai";
+import { DEFAULT_EXA_CONFIG, searchWeb, type ExaConfig } from "@/lib/exa";
 import { exportEncrypted, restoreFromFile } from "@/lib/backup";
 import {
   clearNativeCredentials,
@@ -101,6 +100,7 @@ export default function Settings() {
 
   const [appPw, setAppPw] = useSetting<typeof EMPTY_APP_PW>("googleAppPassword", EMPTY_APP_PW);
   const [ai, setAi] = useSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);
+  const [exa, setExa] = useSetting<ExaConfig>("exa", DEFAULT_EXA_CONFIG);
 
   const [clientId, setClientId] = useState("");
   const [storage, setStorage] = useState(0);
@@ -109,6 +109,7 @@ export default function Settings() {
   const [nativeCreds, setNativeCreds] = useState<{ email: string; appPassword: string } | null>(null);
 
   const [aiBusy, setAiBusy] = useState(false);
+  const [exaBusy, setExaBusy] = useState(false);
   const [bkPass, setBkPass] = useState("");
   const [bkPass2, setBkPass2] = useState("");
   const [bkIncludeMedia, setBkIncludeMedia] = useState(true);
@@ -231,7 +232,7 @@ export default function Settings() {
     const d = await db();
     const stores = [
       "settings", "notes", "diary", "photos", "voice", "music", "movies",
-      "books", "health", "chats", "messages", "downloads", "emails", "browser",
+      "books", "health", "chats", "messages", "downloads", "emails", "browser", "places",
     ] as const;
     const out: Record<string, unknown> = {};
     for (const s of stores) out[s] = await d.getAll(s);
@@ -251,7 +252,7 @@ export default function Settings() {
     if (!window.confirm("Erase ALL Lifeflow data on this device? This cannot be undone.")) return;
     const stores = [
       "settings", "blobs", "notes", "diary", "photos", "voice", "music", "movies",
-      "books", "health", "chats", "messages", "downloads", "chunks", "cache", "emails", "browser",
+      "books", "health", "chats", "messages", "downloads", "chunks", "cache", "emails", "browser", "places", "tiles",
     ] as const;
     for (const s of stores) await clearStore(s);
     await clearLiveCache();
@@ -268,6 +269,23 @@ export default function Settings() {
       toast(e instanceof Error ? e.message : "Could not reach the model");
     } finally {
       setAiBusy(false);
+    }
+  };
+
+  const testExa = async () => {
+    if (!exa.apiKey.trim()) return toast("Enter your Exa API key first");
+    setExaBusy(true);
+    try {
+      const results = await searchWeb("latest news", { numResults: 2, maxChars: 120 });
+      toast(
+        results.length
+          ? `Connected — Exa returned ${results.length} result${results.length > 1 ? "s" : ""}`
+          : "Connected, but Exa returned no results",
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not reach Exa");
+    } finally {
+      setExaBusy(false);
     }
   };
 
@@ -540,9 +558,25 @@ export default function Settings() {
               {aiBusy ? "Testing…" : "Test"}
             </button>
           </Row>
+          <Row label="Exa web-search key">
+            <input
+              type="password"
+              value={exa.apiKey}
+              onChange={(e) => setExa({ ...exa, apiKey: e.target.value })}
+              placeholder="Get a free key at dashboard.exa.ai"
+              className={`${inputCls} max-w-sm`}
+            />
+            <button type="button" onClick={() => void testExa()} disabled={exaBusy} className="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-40">
+              {exaBusy ? "Testing…" : "Test"}
+            </button>
+          </Row>
           <p className="pt-2 text-[11px] leading-relaxed text-muted-foreground">
             {AI_PROVIDERS.find((p) => p.id === providerIdFor(ai.baseUrl))?.hint ??
               "Any OpenAI-compatible endpoint works. The key is stored only on this device and is sent only to the base URL above. Offline, the dashboard briefing falls back to on-device rules automatically."}
+          </p>
+          <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+            With an Exa key, the Companion gains a <b className="text-foreground">Search the web</b> toggle that
+            grounds answers in live results. Your Exa key goes only to api.exa.ai.
           </p>
         </Section>
 

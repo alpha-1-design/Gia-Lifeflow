@@ -30,7 +30,7 @@ export default function Voice() {
 
   const start = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast("Recording is not available in this browser");
+      toast("Recording is not available in this environment");
       return;
     }
     try {

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * publish.mjs — Publish this project to GitHub using only the REST API.
  *
@@ -6,9 +6,9 @@
  * through GitHub's Git Database API (blobs -> tree -> commit -> ref).
  *
  * Usage:
- *   GH_TOKEN=<token> bun scripts/publish.mjs            # create (if needed) + push
- *   GH_TOKEN=<token> bun scripts/publish.mjs --private  # force a private repo
- *   GH_REPO=MyRepo  GH_TOKEN=<token> bun scripts/publish.mjs
+ *   GH_TOKEN=<token> node scripts/publish.mjs            # create (if needed) + push
+ *   GH_TOKEN=<token> node scripts/publish.mjs --private  # force a private repo
+ *   GH_REPO=MyRepo  GH_TOKEN=<token> node scripts/publish.mjs
  *
  * The token needs repo scope (or, for a fine-grained PAT: Contents read/write
  * on the target repo plus the ability to create repositories).
@@ -119,7 +119,7 @@ const SKIP_DIRS = new Set([
   ".vscode",
 ]);
 const SKIP_FILES = new Set([
-  "package-lock.json",
+  "bun.lock",
   "integrations.md",
   "sst-env.d.ts",
   "main.ts",

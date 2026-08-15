@@ -82,6 +82,12 @@ export function fmtBytes(n: number): string {
   return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+export function fmtKm(meters: number): string {
+  if (!Number.isFinite(meters) || meters < 0) return "0 m";
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(meters < 10_000 ? 1 : 0)} km`;
+}
+
 export function fmtKcal(n: number): string {
   return `${Math.round(n)} kcal`;
 }

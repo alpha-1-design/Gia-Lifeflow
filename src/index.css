@@ -237,3 +237,13 @@ input[type="range"]::-moz-range-thumb {
   border: 2px solid var(--card);
   cursor: pointer;
 }
+
+/* Markdown-rendered AI replies (tables, code blocks, lists) */
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+.markdown table {
+  display: table;
+}

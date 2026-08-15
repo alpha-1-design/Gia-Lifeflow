@@ -35,6 +35,7 @@ const STORES: StoreName[] = [
   "budgets",
   "habits",
   "habitLogs",
+  "places",
 ];
 
 function toBase64(bytes: Uint8Array): string {

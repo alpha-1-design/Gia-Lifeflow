@@ -57,9 +57,10 @@ Open-Meteo · Gmail API · Capacitor 8 · JavaMail (native IMAP/SMTP bridge)
 ## Web development
 
 ```bash
-bun install        # install dependencies (bun is the package manager)
-bun run dev        # start the dev server
-bun run build      # typecheck + production build to dist/
+npm install        # install dependencies
+npm run dev        # start the dev server
+npm run build      # typecheck + production build to dist/
+npm run test       # run unit tests (vitest)
 ```
 
 ## Building the Android APK
@@ -67,7 +68,7 @@ bun run build      # typecheck + production build to dist/
 ### Locally
 
 ```bash
-bun run apk        # builds web, syncs Capacitor, runs Gradle assembleDebug
+npm run apk        # builds web, syncs Capacitor, runs Gradle assembleDebug
 ```
 
 The APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`. It is

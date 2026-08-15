@@ -47,6 +47,7 @@ export default function Dashboard() {
   const emails = useCollection<any>("emails");
   const focusSessions = useCollection<any>("focus");
   const transactions = useCollection<any>("transactions");
+  const places = useCollection<any>("places");
   const [aiCfg] = useSetting<AiConfig>("ai", DEFAULT_AI_CONFIG);
 
   const [weather, setWeather] = useState<Weather | null>(null);
@@ -186,6 +187,7 @@ export default function Dashboard() {
             { to: "/app/health", label: "Log health" },
             { to: "/app/music", label: "Add music" },
             { to: "/app/movies", label: "Add a film" },
+            { to: "/app/places", label: "Places" },
           ].map((a) => (
             <Link
               key={a.to}
@@ -197,6 +199,34 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Recent places */}
+      {places.length > 0 && (
+        <div className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="microlabel">Recent places</p>
+            <Link to="/app/places" className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+              View all
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[...places]
+              .sort((a, b) => b.createdAt - a.createdAt)
+              .slice(0, 3)
+              .map((p: any) => (
+                <Link key={p.id} to="/app/places" className="quiet-card p-4 transition-colors hover:bg-accent/30">
+                  <p className="text-sm font-medium">{p.name}</p>
+                  {p.tags?.length > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {p.tags.map((t: string) => `#${t}`).join(" ")}
+                    </p>
+                  )}
+                  <p className="mt-1 text-[11px] text-muted-foreground">{relativeTime(p.createdAt)}</p>
+                </Link>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Live grid */}
       <div className="mt-8 grid gap-4 lg:grid-cols-3">

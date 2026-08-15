@@ -1,5 +1,6 @@
 import {
   Download,
+  HardDrive,
   ListMusic,
   Music2,
   Pause,
@@ -23,11 +24,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import DownloadForm from "@/components/app/DownloadForm";
+import FreeLibraryBrowser from "@/components/app/FreeLibraryBrowser";
 import PageHeader from "@/components/app/PageHeader";
 import BlobImage from "@/components/BlobImage";
 import { useCollection, put, remove, deleteBlob, saveBlob, blobUrl, type Track, type DownloadTask, type Playlist } from "@/lib/db";
-import { fmtBytes, fmtDuration, filenameFromUrl, initialsOf, relativeTime, uid } from "@/lib/format";
-import { cancelDownload, deleteDownload, isDownloadActive, startDownload } from "@/lib/downloader";
+import { fmtBytes, fmtDuration, initialsOf, relativeTime, uid } from "@/lib/format";
+import { cancelDownload, deleteDownload, isDownloadActive } from "@/lib/downloader";
+import { isMediaLibraryAvailable, scanLibrary, importLibraryItem, type LibraryItem } from "@/lib/medialibrary";
 import { notify } from "@/lib/notifications";
 
 const EQ_BANDS = [
@@ -47,9 +51,7 @@ export default function Music() {
   const tracks = useCollection<Track>("music");
   const downloads = useCollection<DownloadTask>("downloads");
   const playlists = useCollection<Playlist>("playlists");
-  const [tab, setTab] = useState<"library" | "downloads">("library");
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
+  const [tab, setTab] = useState<"library" | "downloads" | "browse">("library");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
@@ -72,6 +74,8 @@ export default function Music() {
   const [addTo, setAddTo] = useState<Track | null>(null);
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "title" | "artist">("recent");
+  const [scanning, setScanning] = useState(false);
+  const [deviceItems, setDeviceItems] = useState<LibraryItem[] | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -416,6 +420,43 @@ export default function Music() {
     if (added > 0) toast(`${added} track${added > 1 ? "s" : ""} imported`);
   };
 
+  const scanDevice = async () => {
+    setScanning(true);
+    try {
+      const items = await scanLibrary("audio");
+      setDeviceItems(items);
+      if (items.length === 0) toast("No audio found on this device");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not scan the device library");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const importFromLibrary = async (item: LibraryItem) => {
+    try {
+      const url = await importLibraryItem(item);
+      if (!url) return;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobId = await saveBlob(blob, item.mime || "audio/mpeg");
+      await put<Track>("music", {
+        id: uid(),
+        title: item.name.replace(/\.[a-z0-9]+$/i, ""),
+        artist: item.artist || "Unknown artist",
+        album: item.album || "",
+        blobId,
+        duration: item.duration || 0,
+        createdAt: Date.now(),
+        source: "device",
+      });
+      toast(`Added ${item.name}`);
+    } catch {
+      toast("Couldn't import that file");
+    }
+  };
+
   const removeTrack = async (t: Track) => {
     if (currentId === t.id) {
       audioRef.current?.pause();
@@ -477,6 +518,13 @@ export default function Music() {
               className={`rounded-md px-3 py-1.5 text-sm transition-colors ${tab === "downloads" ? "bg-foreground text-background" : "hover:bg-accent"}`}
             >
               Downloads
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("browse")}
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${tab === "browse" ? "bg-foreground text-background" : "hover:bg-accent"}`}
+            >
+              Browse
             </button>
           </div>
         }
@@ -546,10 +594,56 @@ export default function Music() {
               </select>
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent">
                 <Upload className="h-3.5 w-3.5" /> Import
-                <input type="file" accept="audio/*" multiple className="hidden" onChange={(e) => { void importFiles(e.target.files); e.target.value = ""; }} />
+                <input
+                  type="file"
+                  accept="audio/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => { void importFiles((e.target as HTMLInputElement).files); e.target.value = ""; }}
+                />
               </label>
+              {isMediaLibraryAvailable() && (
+                <button
+                  type="button"
+                  onClick={() => void scanDevice()}
+                  disabled={scanning}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-40"
+                >
+                  <HardDrive className="h-3.5 w-3.5" /> {scanning ? "Scanning…" : "Scan device"}
+                </button>
+              )}
             </div>
           </div>
+
+          {deviceItems !== null && (
+            <div className="mb-4 rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="microlabel">On your device · {deviceItems.length}</p>
+                <button type="button" onClick={() => setDeviceItems(null)} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  Close
+                </button>
+              </div>
+              {deviceItems.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">No audio found.</p>
+              ) : (
+                <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                  {deviceItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border p-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{item.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {item.artist || "Unknown artist"} · {fmtBytes(item.size)}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => void importFromLibrary(item)} className="shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {filtered.length === 0 ? (
             <div className="quiet-card flex flex-col items-center p-12 text-center">
@@ -560,17 +654,18 @@ export default function Music() {
             </div>
           ) : (
             <div className="space-y-1.5">
-              {filtered.map((t) => (
+              {filtered.map((t, i) => (
                 <div
                   key={t.id}
-                  className={`group relative flex items-center gap-3 rounded-md border p-3 transition-colors ${
-                    currentId === t.id ? "border-foreground/50 bg-accent/40" : "hover:bg-accent/30"
+                  className={`group relative flex items-center gap-3 rounded-lg border p-3 transition-all hover:bg-accent/30 ${
+                    currentId === t.id ? "border-foreground/50 bg-accent/40" : ""
                   }`}
                 >
+                  <span className="w-5 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/50">{i + 1}</span>
                   <button
                     type="button"
                     onClick={() => void playTrack(t)}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground text-background transition-opacity hover:opacity-90"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground text-background shadow-sm transition-all hover:scale-105 hover:opacity-90"
                     style={t.coverBlobId ? undefined : { background: coverStyle(t.title) }}
                   >
                     {t.coverBlobId ? (
@@ -645,7 +740,7 @@ export default function Music() {
               <button
                 type="button"
                 onClick={() => setNpOpen(true)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md text-sm font-semibold text-white"
+                className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-semibold text-white shadow-sm"
                 style={current.coverBlobId ? undefined : { background: coverStyle(current.title) }}
               >
                 {current.coverBlobId ? (
@@ -685,7 +780,9 @@ export default function Music() {
                 transition={{ duration: 0.25, ease: "easeOut" }}
                 className="fixed inset-0 z-40 flex flex-col overflow-y-auto bg-background"
               >
-                <div className="flex items-center justify-between px-5 py-4">
+                {/* Ambient color wash from the cover */}
+                <div className="pointer-events-none absolute inset-0 opacity-30 blur-3xl" style={{ background: coverStyle(current.title) }} />
+                <div className="relative z-10 flex items-center justify-between px-5 py-4">
                   <button
                     type="button"
                     onClick={() => setNpOpen(false)}
@@ -697,10 +794,10 @@ export default function Music() {
                   <div className="w-9" />
                 </div>
 
-                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-6 pb-8">
+                <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-6 pb-8">
                   {/* Cover */}
                   <div
-                    className="relative flex h-56 w-56 items-center justify-center overflow-hidden rounded-md shadow-xl md:h-72 md:w-72"
+                    className="relative flex h-56 w-56 items-center justify-center overflow-hidden rounded-2xl shadow-2xl md:h-72 md:w-72"
                     style={current.coverBlobId ? undefined : { background: coverStyle(current.title) }}
                   >
                     {current.coverBlobId ? (
@@ -939,22 +1036,7 @@ export default function Music() {
             <p className="mt-1 mb-4 text-xs text-muted-foreground">
               Large files are pulled in parallel 4 MB chunks and resume where they left off.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/track.mp3" className="min-w-0 flex-1 rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-44 rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
-              <button
-                type="button"
-                disabled={!url.trim()}
-                onClick={() => {
-                  void startDownload({ url: url.trim(), kind: "music", title: title.trim() || filenameFromUrl(url) });
-                  setUrl("");
-                  setTitle("");
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                <Plus className="h-4 w-4" /> Start
-              </button>
-            </div>
+            <DownloadForm kind="music" urlPlaceholder="https://…/track.mp3" />
           </div>
 
           <div className="mt-5 space-y-2">
@@ -969,8 +1051,9 @@ export default function Music() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="font-mono text-xs text-muted-foreground tabular-nums">
-                      {d.total > 0 ? fmtBytes(d.total * d.progress) : ""}
+                      {d.total > 0 ? fmtBytes(d.received ?? d.total * d.progress) : ""}
                       {d.total > 0 ? ` / ${fmtBytes(d.total)}` : ""}
+                      {d.speed ? ` · ${fmtBytes(d.speed)}/s` : ""}
                     </span>
                     {isDownloadActive(d.id) ? (
                       <button type="button" onClick={() => cancelDownload(d.id)} className="rounded-md border px-2.5 py-1 text-xs transition-colors hover:bg-accent">Cancel</button>
@@ -993,6 +1076,12 @@ export default function Music() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === "browse" && (
+        <div className="quiet-card p-5">
+          <FreeLibraryBrowser kind="music" defaultQuery="gospel" />
         </div>
       )}
     </div>

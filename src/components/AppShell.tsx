@@ -9,11 +9,14 @@ import {
   Lock,
   LockOpen,
   Mail,
+  MapPin,
   MessagesSquare,
   Mic,
   Moon,
   Music,
   NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
   Repeat2,
   Settings as SettingsIcon,
   Shield,
@@ -29,7 +32,6 @@ import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
 import { getSetting, useSetting } from "@/lib/db";
-import { fmtTime } from "@/lib/format";
 import { maybeSendBriefing } from "@/lib/notifications";
 import { unlockDeviceSecurity } from "@/lib/webauthn";
 import BlobImage from "@/components/BlobImage";
@@ -54,6 +56,7 @@ const NAV = [
   { to: "/app/mail", label: "Mail", icon: Mail },
   { to: "/app/chat", label: "Chat", icon: MessagesSquare },
   { to: "/app/browser", label: "Browser", icon: Globe },
+  { to: "/app/places", label: "Places", icon: MapPin },
 ];
 
 function titleFor(path: string): string {
@@ -120,7 +123,7 @@ export default function AppShell() {
 
   const [booted, setBooted] = useState(false);
   const [locked, setLocked] = useState(false);
-  const [now, setNow] = useState(() => new Date());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Read real settings once so the lock screen doesn't flash.
   useEffect(() => {
@@ -135,16 +138,14 @@ export default function AppShell() {
     };
   }, []);
 
-  // Live clock + on-device briefing check + lock-from-settings signal.
+  // On-device briefing check + lock-from-settings signal.
   useEffect(() => {
-    const clock = setInterval(() => setNow(new Date()), 30_000);
     const briefing = setInterval(() => {
       void maybeSendBriefing();
     }, 30_000);
     const onLock = () => setLocked(true);
     window.addEventListener("lf-lock", onLock);
     return () => {
-      clearInterval(clock);
       clearInterval(briefing);
       window.removeEventListener("lf-lock", onLock);
     };
@@ -162,22 +163,23 @@ export default function AppShell() {
 
   const title = titleFor(location.pathname);
   const lockEnabled = security.lockEnabled && !!security.lockKey;
+  const showLabels = !sidebarCollapsed;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       {locked && <LockScreen onUnlocked={() => setLocked(false)} />}
 
       {/* Sidebar */}
-      <aside className="flex h-full w-14 shrink-0 flex-col border-r bg-sidebar md:w-56">
+      <aside className={cn("flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200", sidebarCollapsed ? "w-14" : "w-14 md:w-56")}>
         <div className="flex h-14 items-center gap-2.5 border-b px-3 md:px-5">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
             <Shield className="h-3.5 w-3.5" />
           </span>
-          <span className="hidden text-[15px] font-semibold tracking-tight md:block">Lifeflow</span>
+          <span className={cn("hidden text-[15px] font-semibold tracking-tight", showLabels && "md:block")}>Lifeflow</span>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 py-3 md:px-3">
-          <p className="microlabel mb-2 hidden px-2 md:block">Modules</p>
+          <p className={cn("microlabel mb-2 hidden px-2", showLabels && "md:block")}>Modules</p>
           <ul className="space-y-0.5">
             {NAV.map((item) => (
               <li key={item.to}>
@@ -194,7 +196,7 @@ export default function AppShell() {
                   }
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
-                  <span className="hidden truncate md:block">{item.label}</span>
+                  <span className={cn("hidden truncate", showLabels && "md:block")}>{item.label}</span>
                 </NavLink>
               </li>
             ))}
@@ -212,7 +214,7 @@ export default function AppShell() {
                 className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
               >
                 <Lock className="h-4 w-4 shrink-0" />
-                <span className="hidden truncate md:block">Lock</span>
+                <span className={cn("hidden truncate", showLabels && "md:block")}>Lock</span>
               </button>
             </li>
             <li>
@@ -229,7 +231,7 @@ export default function AppShell() {
                 }
               >
                 <SettingsIcon className="h-4 w-4 shrink-0" />
-                <span className="hidden truncate md:block">Settings</span>
+                <span className={cn("hidden truncate", showLabels && "md:block")}>Settings</span>
               </NavLink>
             </li>
           </ul>
@@ -241,6 +243,14 @@ export default function AppShell() {
         <header className="flex h-14 shrink-0 items-center justify-between border-b px-4 md:px-6">
           <div className="flex items-center gap-3">
             <span className="microlabel">{title}</span>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -251,9 +261,6 @@ export default function AppShell() {
             >
               {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            <span className="hidden font-mono text-sm tabular-nums text-muted-foreground sm:block">
-              {fmtTime(now)}
-            </span>
             {profile.name && (
               <button
                 type="button"
