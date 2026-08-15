@@ -188,6 +188,18 @@ html.theme-transition * {
     color 120ms ease;
 }
 
+/* Safe-area insets — status bar / notch / gesture nav bar on edge-to-edge Android */
+@utility safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
 /* Utility: hairline rule used for section separators */
 @utility hairline {
   border-top: 1px solid var(--border);

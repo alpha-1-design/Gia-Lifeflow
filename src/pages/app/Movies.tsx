@@ -589,7 +589,7 @@ export default function Movies() {
                 )}
 
                 {/* Top bar */}
-                <div className={`absolute inset-x-0 top-0 bg-gradient-to-b from-black/80 to-transparent px-5 pt-4 pb-10 transition-opacity duration-300 ${controlsOn ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+                <div className={`safe-top absolute inset-x-0 top-0 bg-gradient-to-b from-black/80 to-transparent px-5 pt-4 pb-10 transition-opacity duration-300 ${controlsOn ? "opacity-100" : "pointer-events-none opacity-0"}`}>
                   <div className="flex items-center justify-between">
                     <button type="button" onClick={close} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-white transition-colors hover:bg-white/10">
                       <X className="h-4 w-4" /> Back
@@ -605,7 +605,7 @@ export default function Movies() {
                 </div>
 
                 {/* Bottom bar */}
-                <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-5 pt-10 pb-4 transition-opacity duration-300 ${controlsOn ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+                <div className={`safe-bottom absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-5 pt-10 pb-4 transition-opacity duration-300 ${controlsOn ? "opacity-100" : "pointer-events-none opacity-0"}`}>
                   <input
                     type="range"
                     min={0}

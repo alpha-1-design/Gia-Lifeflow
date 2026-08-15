@@ -1,10 +1,21 @@
 import { Capacitor } from "@capacitor/core";
+import { StatusBar, Style } from "@capacitor/status-bar";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "next-themes";
 import React, { lazy, Suspense, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+
+// Push the WebView content below the status bar instead of letting it draw
+// underneath (Android 15+/targetSdk 36 enforces edge-to-edge by default, and
+// the config-only StatusBar plugin settings do not apply this on their own —
+// it has to be called at runtime). Safe-area padding in index.css handles
+// the rest (notches, gesture nav bar).
+if (Capacitor.isNativePlatform()) {
+  StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+  StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+}
 
 // Register the offline service worker (web PWA only — the Capacitor native
 // build serves the app from a custom scheme and doesn't need it). Caching is

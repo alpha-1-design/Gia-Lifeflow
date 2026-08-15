@@ -782,7 +782,7 @@ export default function Music() {
               >
                 {/* Ambient color wash from the cover */}
                 <div className="pointer-events-none absolute inset-0 opacity-30 blur-3xl" style={{ background: coverStyle(current.title) }} />
-                <div className="relative z-10 flex items-center justify-between px-5 py-4">
+                <div className="safe-top relative z-10 flex items-center justify-between px-5 py-4">
                   <button
                     type="button"
                     onClick={() => setNpOpen(false)}

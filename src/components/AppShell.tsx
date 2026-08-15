@@ -84,7 +84,7 @@ function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background px-6"
+      className="safe-top safe-bottom fixed inset-0 z-50 flex flex-col items-center justify-center bg-background px-6"
     >
       <div className="flex items-center gap-2.5">
         <span className="flex h-8 w-8 items-center justify-center rounded-md bg-foreground text-background">
@@ -170,7 +170,7 @@ export default function AppShell() {
       {locked && <LockScreen onUnlocked={() => setLocked(false)} />}
 
       {/* Sidebar */}
-      <aside className={cn("flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200", sidebarCollapsed ? "w-14" : "w-14 md:w-56")}>
+      <aside className={cn("safe-top flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200", sidebarCollapsed ? "w-14" : "w-14 md:w-56")}>
         <div className="flex h-14 items-center gap-2.5 border-b px-3 md:px-5">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
             <Shield className="h-3.5 w-3.5" />
@@ -240,7 +240,7 @@ export default function AppShell() {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b px-4 md:px-6">
+        <header className="safe-top flex h-14 shrink-0 items-center justify-between border-b px-4 md:px-6">
           <div className="flex items-center gap-3">
             <span className="microlabel">{title}</span>
             <button

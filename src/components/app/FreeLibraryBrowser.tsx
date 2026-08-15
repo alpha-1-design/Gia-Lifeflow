@@ -1,5 +1,5 @@
 import { BookOpen, Download, ExternalLink, Loader, Music2, Play, Search, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { startDownload } from "@/lib/downloader";
@@ -41,6 +41,14 @@ export default function FreeLibraryBrowser({ kind, defaultQuery = "", genres }: 
       setLoading(false);
     }
   };
+
+  // Auto-run once on mount so the section isn't empty until the user types —
+  // it was previously search-on-demand only, which looked like "nothing
+  // pulls" since nothing loads until you search.
+  useEffect(() => {
+    void runSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const download = (item: FreeItem) => {
     void startDownload({
@@ -177,7 +185,7 @@ export default function FreeLibraryBrowser({ kind, defaultQuery = "", genres }: 
       {/* Stream / read overlay */}
       {streaming && (
         <div className="fixed inset-0 z-40 flex flex-col bg-background">
-          <div className="flex items-center justify-between border-b px-5 py-3">
+          <div className="safe-top flex items-center justify-between border-b px-5 py-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{streaming.title}</p>
               <p className="truncate text-xs text-muted-foreground">{streaming.creator || "Unknown"}</p>

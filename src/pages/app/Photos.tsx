@@ -97,7 +97,7 @@ export default function Photos() {
       {/* Lightbox */}
       {viewing && (
         <div className="fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm">
-          <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="safe-top flex items-center justify-between border-b px-4 py-3">
             <p className="microlabel">Photo</p>
             <div className="flex items-center gap-2">
               <button

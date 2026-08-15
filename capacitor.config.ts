@@ -18,8 +18,15 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
+    // MUST stay false: several modules (AI companion streaming in ai.ts,
+    // the accelerated Range-request downloader in downloader.ts) read
+    // res.body.getReader() directly. CapacitorHttp buffers the whole
+    // response through a native bridge and breaks both — streaming silently
+    // stops working and downloads fail with "No response body". Cross-origin
+    // fetches that need it already have their own CORS-relay fallback
+    // (api.allorigins.win) built into downloader.ts/clients.ts/freelibrary.ts.
     CapacitorHttp: {
-      enabled: true,
+      enabled: false,
     },
     Camera: {
       permissions: ["camera", "read_media_images"],
@@ -33,8 +40,12 @@ const config: CapacitorConfig = {
       showSpinner: false,
     },
     StatusBar: {
+      // overlaysWebView is set at runtime in main.tsx (needs the plugin
+      // call, not just config) so the WebView content is pushed below the
+      // status bar instead of drawing under it on edge-to-edge Android.
       style: "dark",
       backgroundColor: "#0f172a",
+      overlaysWebView: false,
     },
     Viewport: {
       fullscreen: false,
