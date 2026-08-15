@@ -6,7 +6,6 @@
  * working offline. There is no backend: all of these talk to public services
  * directly from your device.
  */
-import Parser from "rss-parser";
 import { db, getOne, put, getSetting } from "./db";
 
 /* ------------------------------- cache --------------------------------- */
@@ -126,10 +125,12 @@ export async function fetchWeather(force = false): Promise<Weather | null> {
 
 /* -------------------------------- news -------------------------------- */
 /**
- * RSS is parsed on-device with rss-parser — no server in the path. Many feeds
- * block browser CORS, so each feed is tried directly first and falls back to
- * a public CORS relay (allorigins) for feeds that refuse. Results are cached
- * in IndexedDB, so the news grid keeps working offline.
+ * RSS/Atom is parsed on-device with the browser's native DOMParser — no
+ * server in the path and no Node builtins (the previous rss-parser/xml2js
+ * stack pulled in Node's `stream` and crashed the production bundle). Many
+ * feeds block browser CORS, so each feed is tried directly first and falls
+ * back to a public CORS relay (allorigins) for feeds that refuse. Results
+ * are cached in IndexedDB, so the news grid keeps working offline.
  */
 
 export interface NewsItem {
@@ -149,13 +150,6 @@ export const DEFAULT_FEEDS = [
   "https://techcrunch.com/feed/",
 ] as const;
 
-function makeParser() {
-  return new Parser({
-    timeout: 9000,
-    headers: { "user-agent": "lifeflow/1.0 (+local-first)" },
-  });
-}
-
 function sourceOf(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -164,33 +158,77 @@ function sourceOf(url: string): string {
   }
 }
 
-async function parseFeedXml(xml: string, source: string): Promise<NewsItem[]> {
-  let feed;
-  try {
-    feed = await makeParser().parseString(xml);
-  } catch {
-    feed = null;
-  }
-  if (!feed) return [];
+/** First descendant element with the given local name (namespace-agnostic). */
+function local(root: Element, name: string): Element | null {
+  return root.getElementsByTagNameNS("*", name)[0] ?? null;
+}
+
+function localText(root: Element, name: string): string {
+  return (local(root, name)?.textContent ?? "").trim();
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+};
+
+/** Strip markup and decode common entities so snippets read as plain text. */
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(amp|lt|gt|quot|#39|apos);/g, (m) => HTML_ENTITIES[m] ?? m)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Parse an RSS 2.0 or Atom feed into news items using the browser's native
+ * XML parser. Handles namespaced elements (`content:encoded`, Atom `link`
+ * attributes) without any Node builtins.
+ */
+export function parseFeedXml(xml: string, source: string): NewsItem[] {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  if (doc.getElementsByTagNameNS("*", "parsererror").length > 0) return [];
+
+  const nodes = [
+    ...Array.from(doc.getElementsByTagNameNS("*", "item")),
+    ...Array.from(doc.getElementsByTagNameNS("*", "entry")),
+  ];
+
   const items: NewsItem[] = [];
-  for (const it of (feed.items ?? []).slice(0, 10)) {
-    const title = (it.title ?? "").trim();
+  for (const node of nodes) {
+    const title = localText(node, "title");
     if (!title) continue;
-    const date = it.isoDate
-      ? new Date(it.isoDate).getTime()
-      : it.pubDate
-        ? new Date(it.pubDate).getTime()
-        : Date.now();
+
+    let link = localText(node, "link");
+    if (!link) link = local(node, "link")?.getAttribute("href") ?? "";
+
+    const rawDate =
+      localText(node, "published") ||
+      localText(node, "updated") ||
+      localText(node, "pubDate");
+    const date = rawDate ? new Date(rawDate).getTime() : Date.now();
+
+    const body =
+      localText(node, "encoded") || // content:encoded (RSS)
+      localText(node, "description") ||
+      localText(node, "summary") ||
+      localText(node, "content");
+
     items.push({
       id: `${source}:${encodeURIComponent(title)}`,
       title,
-      link: it.link ?? "",
+      link,
       source,
       date: Number.isFinite(date) ? date : Date.now(),
-      snippet: (it.contentSnippet ?? it.content ?? "").slice(0, 260).trim(),
+      snippet: plainText(body).slice(0, 260),
     });
   }
-  return items;
+  return items.slice(0, 10);
 }
 
 async function fetchFeed(url: string): Promise<NewsItem[]> {
