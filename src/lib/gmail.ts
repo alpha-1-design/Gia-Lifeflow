@@ -223,12 +223,19 @@ export async function fetchInbox(access: string, maxResults = 25): Promise<Gmail
   const ids = (list.messages ?? []).map((m) => m.id).filter(Boolean);
   if (ids.length === 0) return [];
 
-  const batchRes = await fetch(`${GMAIL_URL}/messages/batchGet?ids=${ids.join(",")}`, {
-    headers: { Authorization: `Bearer ${access}` },
-  });
-  if (!batchRes.ok) throw new Error(`Gmail batch failed (${batchRes.status})`);
-  const batch = (await batchRes.json()) as { messages?: unknown[] };
-  return (batch.messages ?? [])
+  // Gmail's REST API has no `messages.batchGet` route (that only exists for
+  // batchModify/batchDelete) — fetching it 404s every time. Fetch each
+  // message individually, in parallel, instead.
+  const messages = await Promise.all(
+    ids.map(async (id) => {
+      const res = await fetch(`${GMAIL_URL}/messages/${id}?format=full`, {
+        headers: { Authorization: `Bearer ${access}` },
+      });
+      return res.ok ? ((await res.json()) as unknown) : null;
+    }),
+  );
+  return messages
+    .filter((m): m is NonNullable<typeof m> => m !== null)
     .map((m) => parseMessage(m as never))
     .sort((a, b) => b.date - a.date);
 }
