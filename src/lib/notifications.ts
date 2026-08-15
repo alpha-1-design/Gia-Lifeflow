@@ -1,12 +1,33 @@
+import { Capacitor } from "@capacitor/core";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import { getSetting, setSetting, getAll } from "./db";
 import { todayKey } from "./format";
 
 /**
- * Notifications — the browser Notification API. Lifeflow never sends
- * notifications through any server; they are composed and fired on-device.
+ * Notifications.
+ *
+ * Native Android: the web Notification API does not work reliably inside a
+ * Capacitor WebView — `POST_NOTIFICATIONS` (Android 13+) has to be requested
+ * as a real runtime permission and the notification has to be posted through
+ * the OS, neither of which `new Notification()` does in a WebView. This uses
+ * @capacitor/local-notifications there instead. Browser build keeps using the
+ * standard web Notification API. Either way, everything is composed and fired
+ * on-device — no server involved.
  */
 
+let nextId = 1;
+
 export async function ensureNotificationPermission(): Promise<boolean> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const current = await LocalNotifications.checkPermissions();
+      if (current.display === "granted") return true;
+      const req = await LocalNotifications.requestPermissions();
+      return req.display === "granted";
+    } catch {
+      return false;
+    }
+  }
   if (!("Notification" in window)) return false;
   if (Notification.permission === "granted") return true;
   if (Notification.permission === "denied") return false;
@@ -19,12 +40,38 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 }
 
 export function notify(title: string, body?: string): void {
+  if (Capacitor.isNativePlatform()) {
+    LocalNotifications.schedule({
+      notifications: [
+        {
+          id: nextId++,
+          title,
+          body: body ?? "",
+          schedule: { at: new Date(Date.now() + 100) },
+        },
+      ],
+    }).catch(() => {
+      /* permission not granted yet, or plugin unavailable — ignore */
+    });
+    return;
+  }
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   try {
     new Notification(title, { body, icon: "/logo.svg", tag: title });
   } catch {
     /* older browsers may throw — ignore */
   }
+}
+
+export async function isNotificationPermissionGranted(): Promise<boolean> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      return (await LocalNotifications.checkPermissions()).display === "granted";
+    } catch {
+      return false;
+    }
+  }
+  return "Notification" in window && Notification.permission === "granted";
 }
 
 export function testNotification(): void {
@@ -37,7 +84,7 @@ export function testNotification(): void {
  * time while the app is open.
  */
 export async function maybeSendBriefing(): Promise<void> {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!(await isNotificationPermissionGranted())) return;
   const prefs = await getSetting<{ enabled: boolean; briefingTime: string }>(
     "notifications",
     { enabled: false, briefingTime: "08:00" },
