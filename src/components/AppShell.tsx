@@ -170,16 +170,16 @@ export default function AppShell() {
       {locked && <LockScreen onUnlocked={() => setLocked(false)} />}
 
       {/* Sidebar */}
-      <aside className={cn("safe-top flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200", sidebarCollapsed ? "w-14" : "w-14 md:w-56")}>
-        <div className="flex h-14 items-center gap-2.5 border-b px-3 md:px-5">
+      <aside className={cn("safe-top flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200", sidebarCollapsed ? "w-14" : "w-56")}>
+        <div className={cn("flex h-14 items-center gap-2.5 border-b", showLabels ? "px-5" : "px-3")}>
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
             <Shield className="h-3.5 w-3.5" />
           </span>
-          <span className={cn("hidden text-[15px] font-semibold tracking-tight", showLabels && "md:block")}>Lifeflow</span>
+          <span className={cn("hidden text-[15px] font-semibold tracking-tight", showLabels && "block")}>Lifeflow</span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 py-3 md:px-3">
-          <p className={cn("microlabel mb-2 hidden px-2", showLabels && "md:block")}>Modules</p>
+        <nav className={cn("flex-1 overflow-y-auto py-3", showLabels ? "px-3" : "px-2")}>
+          <p className={cn("microlabel mb-2 hidden px-2", showLabels && "block")}>Modules</p>
           <ul className="space-y-0.5">
             {NAV.map((item) => (
               <li key={item.to}>
@@ -196,14 +196,14 @@ export default function AppShell() {
                   }
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
-                  <span className={cn("hidden truncate", showLabels && "md:block")}>{item.label}</span>
+                  <span className={cn("hidden truncate", showLabels && "block")}>{item.label}</span>
                 </NavLink>
               </li>
             ))}
           </ul>
         </nav>
 
-        <div className="border-t px-2 py-3 md:px-3">
+        <div className={cn("border-t py-3", showLabels ? "px-3" : "px-2")}>
           <ul className="space-y-0.5">
             <li>
               <button
@@ -214,7 +214,7 @@ export default function AppShell() {
                 className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
               >
                 <Lock className="h-4 w-4 shrink-0" />
-                <span className={cn("hidden truncate", showLabels && "md:block")}>Lock</span>
+                <span className={cn("hidden truncate", showLabels && "block")}>Lock</span>
               </button>
             </li>
             <li>
@@ -231,7 +231,7 @@ export default function AppShell() {
                 }
               >
                 <SettingsIcon className="h-4 w-4 shrink-0" />
-                <span className={cn("hidden truncate", showLabels && "md:block")}>Settings</span>
+                <span className={cn("hidden truncate", showLabels && "block")}>Settings</span>
               </NavLink>
             </li>
           </ul>
@@ -274,7 +274,7 @@ export default function AppShell() {
                     {(profile.name || "?").slice(0, 1).toUpperCase()}
                   </span>
                 )}
-                <span className="hidden text-sm md:block">{profile.name}</span>
+                <span className="hidden text-sm sm:block">{profile.name}</span>
               </button>
             )}
           </div>
